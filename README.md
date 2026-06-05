@@ -16,7 +16,7 @@ formal employees in Mexico.
 | PoolFactory | [`0x070bd23697b102a152f6d9c322a795cd42466c43d106a420a2d8d3e046cc2673`](https://starkscan.co/contract/0x070bd23697b102a152f6d9c322a795cd42466c43d106a420a2d8d3e046cc2673) |
 | USDC (Starknet) | [`0x033068f6539f8e6e6b131e6b2b814e6c34a5224bc66947c47dab9dfee93b35fb`](https://starkscan.co/contract/0x033068f6539f8e6e6b131e6b2b814e6c34a5224bc66947c47dab9dfee93b35fb) |
 
-LP app (production): https://rocabeneficios.vercel.app — investors
+LP app (production): https://rocabeneficios.vercel.app, where investors
 onboard with a **passkey** (no seed phrase, no gas) via
 [Chipi](https://chipipay.com) wallet infrastructure.
 
@@ -42,7 +42,7 @@ CreditPool (one per partner company)
   owner-set and threshold changes carry 48h on-chain timelocks.
 - Creation charges a fee of `min(cap × 1%, 199 USDC)` to the factory.
 - Every deposit, borrow, repayment and withdrawal is a public mainnet
-  transaction — LP positions are verifiable on Starkscan, not in a
+  transaction. LP positions are verifiable on Starkscan, not in a
   spreadsheet.
 
 ## Layout
