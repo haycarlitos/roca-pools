@@ -1,4 +1,4 @@
-# RoCa Pools — payroll-collateralized lending, funded on-chain
+# RoCa Pools: payroll-collateralized lending, funded on-chain
 
 Cairo smart contracts powering **RoCa Beneficios**' on-chain funding:
 USDC pools on **Starknet mainnet** that fund payroll-secured loans for
@@ -6,7 +6,7 @@ formal employees in Mexico.
 
 > **The collateral is a salary, not a token.** RoCa signs with the
 > *employer*; loan repayment is deducted from payroll by the company
-> itself — before the worker is ever paid. 15 years operating,
+> itself, before the worker is ever paid. 15 years operating,
 > 91 partner companies, 100% company retention.
 
 ## Live on mainnet
@@ -37,8 +37,8 @@ CreditPool (one per partner company)
 - `borrow`, `repay`, `lower_rate` and lifecycle transitions assert
   `caller == founder`.
 - In production the founder is a **2-of-3 passkey multisig** (SHHH
-  account on Starknet): no single person — including RoCa's own
-  founder — can move pooled funds alone. Spend approvals expire in ~2h;
+  account on Starknet): no single person, including RoCa's own
+  founder, can move pooled funds alone. Spend approvals expire in ~2h;
   owner-set and threshold changes carry 48h on-chain timelocks.
 - Creation charges a fee of `min(cap × 1%, 199 USDC)` to the factory.
 - Every deposit, borrow, repayment and withdrawal is a public mainnet
@@ -69,10 +69,10 @@ snforge test
 
 ## What's not in this repo
 
-The lending platform that operates on top of these contracts —
-underwriting, company agreements, payroll integration, loan servicing,
-and the LP application (passkey onboarding, guardian recovery, multisig
-treasury console) — is proprietary. This repository is the complete
+The lending platform that operates on top of these contracts
+(underwriting, company agreements, payroll integration, loan servicing,
+and the LP application: passkey onboarding, guardian recovery, multisig
+treasury console) is proprietary. This repository is the complete
 on-chain layer: everything an LP's funds actually touch.
 
 ## License
