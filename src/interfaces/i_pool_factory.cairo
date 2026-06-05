@@ -1,0 +1,78 @@
+use starknet::ContractAddress;
+use starknet::ClassHash;
+
+/// Pool creation parameters
+#[derive(Drop, Serde, Copy)]
+pub struct PoolParams {
+    pub cap_amount: u256,
+    pub rate_bps: u16,
+    pub duration_days: u32,
+    pub interval_days: u32,
+    pub data_room_hash: felt252,
+}
+
+/// Factory configuration
+#[derive(Drop, Serde, Copy)]
+pub struct FactoryConfig {
+    pub owner: ContractAddress,
+    pub platform_wallet: ContractAddress,
+    pub usdc_address: ContractAddress,
+    pub credit_pool_class_hash: ClassHash,
+    pub creation_fee_cap: u256,
+    pub creation_fee_bps: u16,
+    pub repayment_fee_bps: u16,
+    pub pool_count: u64,
+    pub paused: bool,
+}
+
+#[starknet::interface]
+pub trait IPoolFactory<TContractState> {
+    /// Deploy a new credit pool contract
+    /// Returns the deployed pool address
+    fn create_pool(
+        ref self: TContractState,
+        cap_amount: u256,
+        rate_bps: u16,
+        duration_days: u32,
+        interval_days: u32,
+        funding_deadline: u64,
+        data_room_hash: felt252,
+    ) -> ContractAddress;
+
+    /// Update the pool class hash for new deployments
+    fn set_pool_class_hash(ref self: TContractState, class_hash: ClassHash);
+
+    /// Update the platform wallet that receives fees
+    fn set_platform_wallet(ref self: TContractState, wallet: ContractAddress);
+
+    /// Update fee parameters
+    fn set_fees(
+        ref self: TContractState,
+        creation_fee_cap: u256,
+        creation_fee_bps: u16,
+        repayment_fee_bps: u16,
+    );
+
+    /// Pause the factory (prevents new pool creation)
+    fn pause(ref self: TContractState);
+
+    /// Unpause the factory
+    fn unpause(ref self: TContractState);
+
+    // View functions
+
+    /// Calculate creation fee for a given cap amount
+    fn get_creation_fee(self: @TContractState, cap_amount: u256) -> u256;
+
+    /// Check if an address is a valid pool deployed by this factory
+    fn is_valid_pool(self: @TContractState, pool: ContractAddress) -> bool;
+
+    /// Get pool address by index
+    fn get_pool(self: @TContractState, index: u64) -> ContractAddress;
+
+    /// Get factory configuration
+    fn get_config(self: @TContractState) -> FactoryConfig;
+
+    /// Get the current repayment fee in basis points
+    fn get_repayment_fee_bps(self: @TContractState) -> u16;
+}

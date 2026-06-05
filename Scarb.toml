@@ -1,0 +1,17 @@
+[package]
+name = "seedless_contracts"
+version = "0.1.0"
+edition = "2024_07"
+
+[dependencies]
+starknet = "2.11.4"
+openzeppelin_access = { git = "https://github.com/OpenZeppelin/cairo-contracts.git", tag = "v1.0.0" }
+openzeppelin_token = { git = "https://github.com/OpenZeppelin/cairo-contracts.git", tag = "v1.0.0" }
+openzeppelin_security = { git = "https://github.com/OpenZeppelin/cairo-contracts.git", tag = "v1.0.0" }
+
+[dev-dependencies]
+snforge_std_deprecated = { git = "https://github.com/foundry-rs/starknet-foundry.git", tag = "v0.53.0" }
+
+[[target.starknet-contract]]
+sierra = true
+casm = true
