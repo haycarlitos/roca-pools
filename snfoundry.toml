@@ -1,0 +1,22 @@
+# Starknet Foundry configuration.
+#
+# The RPC URL is deliberately NOT here. Ours carries an API key in the path,
+# and this file is committed — scripts/deploy.sh passes --url from
+# STARKNET_RPC_URL instead. Keep it that way.
+#
+# The account must already exist in sncast's accounts file and be funded on
+# the target network:
+#
+#   sncast account import --name roca-deployer --address 0x... \
+#     --private-key 0x... --type oz
+#
+# Toolchain versions are pinned in .tool-versions; Scarb.lock pins the
+# dependency commits. Both matter — a different Cairo release produces a
+# different class hash from identical source.
+
+[sncast.default]
+account = "roca-deployer"
+
+[snforge]
+# `scarb test` runs the suite in tests/.
+exit_first = false

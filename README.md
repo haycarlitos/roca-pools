@@ -61,10 +61,65 @@ tests/
 
 ## Build & test
 
+Toolchain versions are pinned in `.tool-versions` (asdf/mise). They are not
+cosmetic: a class hash is a function of the compiler version, so building
+with a different Scarb produces a different class than the one deployed.
+
 ```bash
-# scarb 2.11.x · starknet-foundry 0.53.x
+asdf install          # or: mise install
 scarb build
 snforge test
+```
+
+## Deploy
+
+```bash
+export STARKNET_RPC_URL=...          # never committed; ours carries an API key
+./scripts/deploy.sh --dry-run --owner 0x... --platform-wallet 0x...
+./scripts/deploy.sh --owner 0x... --platform-wallet 0x...
+```
+
+The script declares `CreditPool`, declares `PoolFactory`, then deploys the
+factory with `(owner, platform_wallet, usdc_address, credit_pool_class_hash)`
+in that order. Order matters — the factory clones pools from the class hash it
+is constructed with, and `create_pool` is permanently bound to it for every
+pool it creates. Re-declaring an already-declared class is treated as success,
+so re-runs are safe.
+
+Requires an `sncast` account named in `snfoundry.toml`, funded on the target
+network.
+
+### What the live factory was deployed with
+
+Read back from `get_config()` on mainnet, for comparison after any redeploy:
+
+| | |
+|---|---|
+| owner | `0x06152df0e70bedbf7c8256f9e26eda77ba8785db3d8b7dc545a62886f618d5c0` |
+| platform_wallet | same as owner |
+| usdc_address | `0x033068f6539f8e6e6b131e6b2b814e6c34a5224bc66947c47dab9dfee93b35fb` |
+| credit_pool_class_hash | `0x07d50032f6d6d9e15b8a550d686c6737e2ecca2a51c9ee397235f946382502cc` |
+| creation_fee_cap | 199 USDC |
+| creation_fee_bps | 100 (1%) |
+| repayment_fee_bps | 50 (0.5%) |
+
+Fees are storage, not constants: `set_fees()` changes them on a live factory
+with no redeploy. The values above are the constructor defaults, still
+unchanged on mainnet.
+
+### After deploying
+
+A new factory starts with `pool_count = 0`, and the app reads a single
+`NEXT_PUBLIC_POOL_FACTORY_ADDRESS`. Pointing it at a new factory makes every
+existing pool invisible to pool discovery and to the indexer's reconcile
+sweep — the pools keep working on chain, but the app stops seeing them.
+
+Because `NEXT_PUBLIC_*` is inlined at build time, changing the address needs a
+**rebuild**, not just a redeploy. Then regenerate the ABIs the app parses
+against, which are dumped from the deployed class rather than hand-written:
+
+```bash
+npx tsx scripts/dump-abi.ts   # in the roca-beneficios repo
 ```
 
 ## What's not in this repo

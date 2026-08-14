@@ -1,0 +1,11 @@
+# asdf / mise toolchain pins.
+#
+# These are not cosmetic: the class hash a contract compiles to is a function
+# of the compiler version. Building the same source with a different Scarb
+# produces a different class hash, which means a "redeploy" silently becomes a
+# new class rather than the one already audited and referenced on chain.
+#
+# scarb 2.11.4 matches `starknet = "2.11.4"` in Scarb.toml.
+# starknet-foundry 0.53.0 matches the snforge_std_deprecated tag in Scarb.lock.
+scarb 2.11.4
+starknet-foundry 0.53.0
