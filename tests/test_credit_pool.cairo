@@ -1,17 +1,14 @@
-use starknet::ContractAddress;
-use starknet::contract_address_const;
-use snforge_std_deprecated::{
-    declare, ContractClassTrait, DeclareResultTrait,
-    start_cheat_caller_address, stop_cheat_caller_address,
-    start_cheat_block_timestamp, stop_cheat_block_timestamp,
-};
-
-use seedless_contracts::interfaces::i_pool_factory::{
-    IPoolFactoryDispatcher, IPoolFactoryDispatcherTrait
-};
 use seedless_contracts::interfaces::i_credit_pool::{
-    ICreditPoolDispatcher, ICreditPoolDispatcherTrait, PoolStatus
+    ICreditPoolDispatcher, ICreditPoolDispatcherTrait, PoolStatus,
 };
+use seedless_contracts::interfaces::i_pool_factory::{
+    IPoolFactoryDispatcher, IPoolFactoryDispatcherTrait,
+};
+use snforge_std_deprecated::{
+    ContractClassTrait, DeclareResultTrait, declare, start_cheat_block_timestamp,
+    start_cheat_caller_address, stop_cheat_block_timestamp, stop_cheat_caller_address,
+};
+use starknet::{ContractAddress, contract_address_const};
 
 fn OWNER() -> ContractAddress {
     contract_address_const::<'OWNER'>()
@@ -69,20 +66,35 @@ fn test_factory_deployment() {
 }
 
 #[test]
-fn test_creation_fee_calculation() {
+fn test_creation_fee_is_zero_by_default() {
+    // Fees ship off. A fee that has to be switched off after deploy is a fee
+    // that gets charged by accident in between.
     let pool_class = declare("CreditPool").unwrap().contract_class();
     let factory_address = deploy_factory(*pool_class.class_hash);
     let factory = IPoolFactoryDispatcher { contract_address: factory_address };
 
-    // Test 1% fee (below cap)
-    let small_amount: u256 = 10_000_000_000; // $10,000
-    let fee1 = factory.get_creation_fee(small_amount);
-    assert(fee1 == 100_000_000, 'Should be 1% = $100'); // $100
+    assert(factory.get_creation_fee(10_000_000_000) == 0, 'No creation fee');
+    assert(factory.get_creation_fee(50_000_000_000) == 0, 'No creation fee at any size');
+    assert(factory.get_repayment_fee_bps() == 0, 'No repayment fee');
+}
 
-    // Test fee cap ($199)
-    let large_amount: u256 = 50_000_000_000; // $50,000
-    let fee2 = factory.get_creation_fee(large_amount);
-    assert(fee2 == 199_000_000, 'Should be capped at $199');
+#[test]
+fn test_creation_fee_math_when_enabled() {
+    // The bps-with-a-cap arithmetic still has to be right for the day it is
+    // switched on, so exercise it explicitly rather than relying on defaults.
+    let pool_class = declare("CreditPool").unwrap().contract_class();
+    let factory_address = deploy_factory(*pool_class.class_hash);
+    let factory = IPoolFactoryDispatcher { contract_address: factory_address };
+
+    start_cheat_caller_address(factory_address, OWNER());
+    factory.set_fees(199_000_000, 100, 50); // $199 cap, 1%, 0.5%
+    stop_cheat_caller_address(factory_address);
+
+    // 1% of $10,000 is $100, under the cap.
+    assert(factory.get_creation_fee(10_000_000_000) == 100_000_000, 'Should be 1% = $100');
+    // 1% of $50,000 is $500, so the $199 cap binds.
+    assert(factory.get_creation_fee(50_000_000_000) == 199_000_000, 'Should be capped at $199');
+    assert(factory.get_repayment_fee_bps() == 50, 'Repayment fee set');
 }
 
 #[test]
@@ -93,19 +105,23 @@ fn test_pool_info() {
     let pool = ICreditPoolDispatcher { contract_address: pool_address };
 
     // Initialize the pool
-    pool.initialize(
-        contract_address_const::<'FACTORY'>(),
-        FOUNDER(),
-        USDC(),
-        PLATFORM_WALLET(),
-        50, // 0.5% repayment fee
-        10_000_000_000, // $10,000 cap
-        1500, // 15% rate
-        365, // 1 year duration
-        30, // monthly payments
-        FUNDING_DEADLINE,
-        'DATA_ROOM_HASH',
-    );
+    pool
+        .initialize(
+            contract_address_const::<'FACTORY'>(),
+            FOUNDER(),
+            USDC(),
+            PLATFORM_WALLET(),
+            50, // 0.5% repayment fee
+            10_000_000_000, // $10,000 cap
+            1500, // 15% rate
+            365, // 1 year duration
+            30, // monthly payments
+            FUNDING_DEADLINE,
+            'DATA_ROOM_HASH',
+            100,
+            0,
+            false,
+        );
 
     let info = pool.get_pool_info();
 
@@ -127,19 +143,23 @@ fn test_rate_lowering() {
 
     let pool = ICreditPoolDispatcher { contract_address: pool_address };
 
-    pool.initialize(
-        contract_address_const::<'FACTORY'>(),
-        FOUNDER(),
-        USDC(),
-        PLATFORM_WALLET(),
-        50,
-        10_000_000_000,
-        1500, // 15% initial rate
-        365,
-        30,
-        FUNDING_DEADLINE,
-        'DATA_ROOM_HASH',
-    );
+    pool
+        .initialize(
+            contract_address_const::<'FACTORY'>(),
+            FOUNDER(),
+            USDC(),
+            PLATFORM_WALLET(),
+            50,
+            10_000_000_000,
+            1500, // 15% initial rate
+            365,
+            30,
+            FUNDING_DEADLINE,
+            'DATA_ROOM_HASH',
+            100,
+            0,
+            false,
+        );
 
     // Lower rate as founder
     start_cheat_caller_address(pool_address, FOUNDER());
@@ -159,19 +179,23 @@ fn test_cannot_increase_rate() {
 
     let pool = ICreditPoolDispatcher { contract_address: pool_address };
 
-    pool.initialize(
-        contract_address_const::<'FACTORY'>(),
-        FOUNDER(),
-        USDC(),
-        PLATFORM_WALLET(),
-        50,
-        10_000_000_000,
-        1500,
-        365,
-        30,
-        FUNDING_DEADLINE,
-        'DATA_ROOM_HASH',
-    );
+    pool
+        .initialize(
+            contract_address_const::<'FACTORY'>(),
+            FOUNDER(),
+            USDC(),
+            PLATFORM_WALLET(),
+            50,
+            10_000_000_000,
+            1500,
+            365,
+            30,
+            FUNDING_DEADLINE,
+            'DATA_ROOM_HASH',
+            100,
+            0,
+            false,
+        );
 
     // Try to increase rate - should fail
     start_cheat_caller_address(pool_address, FOUNDER());
@@ -186,19 +210,23 @@ fn test_pool_activation() {
 
     let pool = ICreditPoolDispatcher { contract_address: pool_address };
 
-    pool.initialize(
-        contract_address_const::<'FACTORY'>(),
-        FOUNDER(),
-        USDC(),
-        PLATFORM_WALLET(),
-        50,
-        10_000_000_000,
-        1500,
-        365,
-        30,
-        FUNDING_DEADLINE,
-        'DATA_ROOM_HASH',
-    );
+    pool
+        .initialize(
+            contract_address_const::<'FACTORY'>(),
+            FOUNDER(),
+            USDC(),
+            PLATFORM_WALLET(),
+            50,
+            10_000_000_000,
+            1500,
+            365,
+            30,
+            FUNDING_DEADLINE,
+            'DATA_ROOM_HASH',
+            100,
+            0,
+            false,
+        );
 
     let info_before = pool.get_pool_info();
     assert(info_before.status == PoolStatus::Pending, 'Should be pending');
@@ -220,19 +248,23 @@ fn test_only_founder_can_activate() {
 
     let pool = ICreditPoolDispatcher { contract_address: pool_address };
 
-    pool.initialize(
-        contract_address_const::<'FACTORY'>(),
-        FOUNDER(),
-        USDC(),
-        PLATFORM_WALLET(),
-        50,
-        10_000_000_000,
-        1500,
-        365,
-        30,
-        FUNDING_DEADLINE,
-        'DATA_ROOM_HASH',
-    );
+    pool
+        .initialize(
+            contract_address_const::<'FACTORY'>(),
+            FOUNDER(),
+            USDC(),
+            PLATFORM_WALLET(),
+            50,
+            10_000_000_000,
+            1500,
+            365,
+            30,
+            FUNDING_DEADLINE,
+            'DATA_ROOM_HASH',
+            100,
+            0,
+            false,
+        );
 
     // Try to activate as non-founder - should fail
     start_cheat_caller_address(pool_address, LENDER1());
@@ -250,19 +282,23 @@ fn test_expire_pool() {
     // Use a short deadline for testing (1 day = 86400 seconds)
     let short_deadline: u64 = 86400;
 
-    pool.initialize(
-        contract_address_const::<'FACTORY'>(),
-        FOUNDER(),
-        USDC(),
-        PLATFORM_WALLET(),
-        50,
-        10_000_000_000,
-        1500,
-        365,
-        30,
-        short_deadline,
-        'DATA_ROOM_HASH',
-    );
+    pool
+        .initialize(
+            contract_address_const::<'FACTORY'>(),
+            FOUNDER(),
+            USDC(),
+            PLATFORM_WALLET(),
+            50,
+            10_000_000_000,
+            1500,
+            365,
+            30,
+            short_deadline,
+            'DATA_ROOM_HASH',
+            100,
+            0,
+            false,
+        );
 
     // Activate the pool
     start_cheat_caller_address(pool_address, FOUNDER());
@@ -294,19 +330,23 @@ fn test_cannot_expire_before_deadline() {
 
     let pool = ICreditPoolDispatcher { contract_address: pool_address };
 
-    pool.initialize(
-        contract_address_const::<'FACTORY'>(),
-        FOUNDER(),
-        USDC(),
-        PLATFORM_WALLET(),
-        50,
-        10_000_000_000,
-        1500,
-        365,
-        30,
-        FUNDING_DEADLINE,
-        'DATA_ROOM_HASH',
-    );
+    pool
+        .initialize(
+            contract_address_const::<'FACTORY'>(),
+            FOUNDER(),
+            USDC(),
+            PLATFORM_WALLET(),
+            50,
+            10_000_000_000,
+            1500,
+            365,
+            30,
+            FUNDING_DEADLINE,
+            'DATA_ROOM_HASH',
+            100,
+            0,
+            false,
+        );
 
     // Try to expire before deadline - should fail
     pool.expire();
@@ -319,19 +359,23 @@ fn test_cancel_pool() {
 
     let pool = ICreditPoolDispatcher { contract_address: pool_address };
 
-    pool.initialize(
-        contract_address_const::<'FACTORY'>(),
-        FOUNDER(),
-        USDC(),
-        PLATFORM_WALLET(),
-        50,
-        10_000_000_000,
-        1500,
-        365,
-        30,
-        FUNDING_DEADLINE,
-        'DATA_ROOM_HASH',
-    );
+    pool
+        .initialize(
+            contract_address_const::<'FACTORY'>(),
+            FOUNDER(),
+            USDC(),
+            PLATFORM_WALLET(),
+            50,
+            10_000_000_000,
+            1500,
+            365,
+            30,
+            FUNDING_DEADLINE,
+            'DATA_ROOM_HASH',
+            100,
+            0,
+            false,
+        );
 
     let info_before = pool.get_pool_info();
     assert(info_before.status == PoolStatus::Pending, 'Should be pending');
@@ -353,19 +397,23 @@ fn test_only_founder_can_cancel() {
 
     let pool = ICreditPoolDispatcher { contract_address: pool_address };
 
-    pool.initialize(
-        contract_address_const::<'FACTORY'>(),
-        FOUNDER(),
-        USDC(),
-        PLATFORM_WALLET(),
-        50,
-        10_000_000_000,
-        1500,
-        365,
-        30,
-        FUNDING_DEADLINE,
-        'DATA_ROOM_HASH',
-    );
+    pool
+        .initialize(
+            contract_address_const::<'FACTORY'>(),
+            FOUNDER(),
+            USDC(),
+            PLATFORM_WALLET(),
+            50,
+            10_000_000_000,
+            1500,
+            365,
+            30,
+            FUNDING_DEADLINE,
+            'DATA_ROOM_HASH',
+            100,
+            0,
+            false,
+        );
 
     // Non-founder tries to cancel - should fail
     start_cheat_caller_address(pool_address, LENDER1());
@@ -380,19 +428,23 @@ fn test_pool_info_includes_last_repayment_at() {
 
     let pool = ICreditPoolDispatcher { contract_address: pool_address };
 
-    pool.initialize(
-        contract_address_const::<'FACTORY'>(),
-        FOUNDER(),
-        USDC(),
-        PLATFORM_WALLET(),
-        50,
-        10_000_000_000,
-        1500,
-        365,
-        30,
-        FUNDING_DEADLINE,
-        'DATA_ROOM_HASH',
-    );
+    pool
+        .initialize(
+            contract_address_const::<'FACTORY'>(),
+            FOUNDER(),
+            USDC(),
+            PLATFORM_WALLET(),
+            50,
+            10_000_000_000,
+            1500,
+            365,
+            30,
+            FUNDING_DEADLINE,
+            'DATA_ROOM_HASH',
+            100,
+            0,
+            false,
+        );
 
     let info = pool.get_pool_info();
 

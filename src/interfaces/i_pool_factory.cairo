@@ -1,5 +1,4 @@
-use starknet::ContractAddress;
-use starknet::ClassHash;
+use starknet::{ClassHash, ContractAddress};
 
 /// Pool creation parameters
 #[derive(Drop, Serde, Copy)]
@@ -37,6 +36,8 @@ pub trait IPoolFactory<TContractState> {
         interval_days: u32,
         funding_deadline: u64,
         data_room_hash: felt252,
+        max_lenders_limit: u32,
+        min_deposit_amount: u256,
     ) -> ContractAddress;
 
     /// Update the pool class hash for new deployments
@@ -75,4 +76,35 @@ pub trait IPoolFactory<TContractState> {
 
     /// Get the current repayment fee in basis points
     fn get_repayment_fee_bps(self: @TContractState) -> u16;
+
+    // ---- Lender allowlist ---------------------------------------------------
+    //
+    // The registry lives on the FACTORY, not on each pool, and every pool reads
+    // through to it. That is the whole point: when an investor has to be
+    // removed, it is one transaction rather than one per pool per investor, and
+    // the delay between "we must revoke" and "revoked everywhere" is what
+    // matters in a sanctions case.
+    //
+    // The cost of that choice is a cross-contract call on every deposit, and a
+    // factory that becomes a liveness dependency for deposits across all pools.
+    // It fails closed, which is the right direction.
+
+    /// Authorize or revoke a single lender. Compliance officer only.
+    fn set_lp_authorization(ref self: TContractState, lp: ContractAddress, authorized: bool);
+
+    /// Same, in bulk. Bounded so the call cannot exceed a block's step limit.
+    fn set_lp_authorization_batch(
+        ref self: TContractState, lps: Span<ContractAddress>, authorized: bool,
+    );
+
+    /// Whether this address may deposit into pools from this factory.
+    fn is_authorized(self: @TContractState, lp: ContractAddress) -> bool;
+
+    /// Set the address allowed to change authorizations. Owner only.
+    ///
+    /// Deliberately separate from ownership: the owner can redirect fees, swap
+    /// the pool class and pause the factory. The key that must be reachable
+    /// within minutes of a sanctions hit should not also carry all of that.
+    fn set_compliance_officer(ref self: TContractState, officer: ContractAddress);
+    fn get_compliance_officer(self: @TContractState) -> ContractAddress;
 }

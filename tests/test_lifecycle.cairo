@@ -1,17 +1,12 @@
-use starknet::ContractAddress;
-use starknet::contract_address_const;
-use snforge_std_deprecated::{
-    declare, ContractClassTrait, DeclareResultTrait,
-    start_cheat_caller_address, stop_cheat_caller_address,
-    start_cheat_block_timestamp, stop_cheat_block_timestamp,
-};
-
 use seedless_contracts::interfaces::i_credit_pool::{
-    ICreditPoolDispatcher, ICreditPoolDispatcherTrait, PoolStatus
+    ICreditPoolDispatcher, ICreditPoolDispatcherTrait, PoolStatus,
 };
-use seedless_contracts::mocks::mock_erc20::{
-    IMockERC20Dispatcher, IMockERC20DispatcherTrait
+use seedless_contracts::mocks::mock_erc20::{IMockERC20Dispatcher, IMockERC20DispatcherTrait};
+use snforge_std_deprecated::{
+    ContractClassTrait, DeclareResultTrait, declare, start_cheat_block_timestamp,
+    start_cheat_caller_address, stop_cheat_block_timestamp, stop_cheat_caller_address,
 };
+use starknet::{ContractAddress, contract_address_const};
 
 // Constants
 const USDC_DECIMALS: u8 = 6;
@@ -57,24 +52,24 @@ fn deploy_pool() -> ICreditPoolDispatcher {
 }
 
 /// Initialize pool with standard test parameters
-fn initialize_pool(
-    pool: ICreditPoolDispatcher,
-    usdc: ContractAddress,
-    funding_deadline: u64,
-) {
-    pool.initialize(
-        FACTORY(),
-        FOUNDER(),
-        usdc,
-        PLATFORM_WALLET(),
-        50, // 0.5% repayment fee
-        10_000 * ONE_USDC, // $10,000 cap
-        1000, // 10% annual rate
-        365, // 1 year duration
-        30, // monthly interval
-        funding_deadline,
-        'DATA_ROOM_HASH',
-    );
+fn initialize_pool(pool: ICreditPoolDispatcher, usdc: ContractAddress, funding_deadline: u64) {
+    pool
+        .initialize(
+            FACTORY(),
+            FOUNDER(),
+            usdc,
+            PLATFORM_WALLET(),
+            50, // 0.5% repayment fee
+            10_000 * ONE_USDC, // $10,000 cap
+            1000, // 10% annual rate
+            365, // 1 year duration
+            30, // monthly interval
+            funding_deadline,
+            'DATA_ROOM_HASH',
+            100, // max lenders: high enough not to interfere
+            0, // no minimum deposit
+            false // no allowlist: these pools are deployed without a live factory
+        );
 }
 
 // ============================================
@@ -129,8 +124,20 @@ fn test_deposit_withdraw_before_borrow() {
     assert(usdc.balance_of(LENDER1()) == deposit_amount, 'Lender should have USDC back');
     assert(usdc.balance_of(pool_address) == 0, 'Pool should be empty');
 
+    // A full exit before the money is lent out unwinds the participation
+    // entirely: the accounting follows the cash, and the roster slot is
+    // returned so the pool can still be filled by someone else.
+    //
+    // The historical fact that they deposited is not lost, it lives in the
+    // Deposited and Withdrawn events. What is cleared is only current state.
+    let info_after = pool.get_pool_info();
+    assert(info_after.total_deposited == 0, 'Accounting follows the cash');
+    assert(info_after.lender_count == 0, 'Roster slot returned');
+    assert(!pool.is_lender(LENDER1()), 'No longer a lender');
+
     let position_after = pool.get_position(LENDER1());
-    assert(position_after.withdrawn == deposit_amount, 'Should be fully withdrawn');
+    assert(position_after.deposited == 0, 'Position cleared');
+    assert(position_after.withdrawn == 0, 'Position cleared');
 }
 
 #[test]
@@ -561,4 +568,92 @@ fn test_repayment_resets_overdue_timer() {
     assert(info.last_repayment_at == repay_time, 'Should update last_repayment');
 
     stop_cheat_block_timestamp(pool_address);
+}
+
+// ============================================
+// ACCOUNTING INVARIANT: total_deposited vs real balance
+// ============================================
+
+/// `total_deposited` must equal the pool's USDC balance while the pool is
+/// still Pending or Active, because nothing has been lent out yet.
+///
+/// This is the invariant `test_deposit_withdraw_before_borrow` never asserted.
+/// That test withdraws everything, checks the lender got their money and that
+/// `position.withdrawn` is right, and stops. It passes while leaving the pool
+/// claiming deposits it no longer holds.
+#[test]
+fn test_total_deposited_tracks_balance_after_pre_borrow_withdraw() {
+    let usdc = deploy_usdc();
+    let pool = deploy_pool();
+    let pool_address = pool.contract_address;
+
+    initialize_pool(pool, usdc.contract_address, 30 * SECONDS_PER_DAY);
+
+    start_cheat_caller_address(pool_address, FOUNDER());
+    pool.activate();
+    stop_cheat_caller_address(pool_address);
+
+    let amount = 1_000 * ONE_USDC;
+    usdc.mint(LENDER1(), amount);
+
+    start_cheat_caller_address(usdc.contract_address, LENDER1());
+    usdc.approve(pool_address, amount);
+    stop_cheat_caller_address(usdc.contract_address);
+
+    start_cheat_caller_address(pool_address, LENDER1());
+    pool.deposit(amount);
+    pool.withdraw();
+    stop_cheat_caller_address(pool_address);
+
+    let info = pool.get_pool_info();
+    assert(usdc.balance_of(pool_address) == 0, 'Pool should hold nothing');
+    assert(info.total_deposited == 0, 'total_deposited must follow');
+}
+
+/// The consequence of the invariant above breaking: `borrow` sends
+/// `total_deposited`, so an inflated figure makes the transfer exceed the
+/// balance and the pool can never be funded.
+///
+/// LENDER2 deposits and stays. LENDER1 deposits and leaves before borrow.
+/// The founder must still be able to borrow what is actually there.
+#[test]
+fn test_borrow_still_works_after_a_lender_exits_pre_borrow() {
+    let usdc = deploy_usdc();
+    let pool = deploy_pool();
+    let pool_address = pool.contract_address;
+
+    initialize_pool(pool, usdc.contract_address, 30 * SECONDS_PER_DAY);
+
+    start_cheat_caller_address(pool_address, FOUNDER());
+    pool.activate();
+    stop_cheat_caller_address(pool_address);
+
+    let stays = 2_000 * ONE_USDC;
+    let leaves = 1_000 * ONE_USDC;
+    usdc.mint(LENDER2(), stays);
+    usdc.mint(LENDER1(), leaves);
+
+    start_cheat_caller_address(usdc.contract_address, LENDER2());
+    usdc.approve(pool_address, stays);
+    stop_cheat_caller_address(usdc.contract_address);
+    start_cheat_caller_address(pool_address, LENDER2());
+    pool.deposit(stays);
+    stop_cheat_caller_address(pool_address);
+
+    start_cheat_caller_address(usdc.contract_address, LENDER1());
+    usdc.approve(pool_address, leaves);
+    stop_cheat_caller_address(usdc.contract_address);
+    start_cheat_caller_address(pool_address, LENDER1());
+    pool.deposit(leaves);
+    pool.withdraw();
+    stop_cheat_caller_address(pool_address);
+
+    // Only LENDER2's money is left in the pool.
+    assert(usdc.balance_of(pool_address) == stays, 'Only LENDER2 remains');
+
+    start_cheat_caller_address(pool_address, FOUNDER());
+    pool.borrow();
+    stop_cheat_caller_address(pool_address);
+
+    assert(usdc.balance_of(FOUNDER()) == stays, 'Founder gets what was there');
 }

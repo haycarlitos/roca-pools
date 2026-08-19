@@ -1,20 +1,23 @@
 #[starknet::contract]
 pub mod PoolFactory {
-    use starknet::{
-        ContractAddress, ClassHash, get_caller_address, get_block_timestamp,
-        get_contract_address, syscalls::deploy_syscall, SyscallResultTrait
-    };
-    use core::pedersen::pedersen;
-    use starknet::storage::{
-        StoragePointerReadAccess, StoragePointerWriteAccess,
-        Map, StorageMapReadAccess, StorageMapWriteAccess
-    };
     use core::num::traits::Zero;
+    use core::pedersen::pedersen;
     use openzeppelin_access::ownable::OwnableComponent;
     use openzeppelin_security::pausable::PausableComponent;
     use openzeppelin_token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
-    use seedless_contracts::interfaces::i_pool_factory::{IPoolFactory, FactoryConfig};
-    use seedless_contracts::interfaces::i_credit_pool::{ICreditPoolDispatcher, ICreditPoolDispatcherTrait};
+    use seedless_contracts::interfaces::i_credit_pool::{
+        ICreditPoolDispatcher, ICreditPoolDispatcherTrait,
+    };
+    use seedless_contracts::interfaces::i_pool_factory::{FactoryConfig, IPoolFactory};
+    use starknet::storage::{
+        Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
+        StoragePointerWriteAccess,
+    };
+    use starknet::syscalls::deploy_syscall;
+    use starknet::{
+        ClassHash, ContractAddress, SyscallResultTrait, get_block_timestamp, get_caller_address,
+        get_contract_address,
+    };
 
     // Components
     component!(path: OwnableComponent, storage: ownable, event: OwnableEvent);
@@ -29,10 +32,22 @@ pub mod PoolFactory {
     impl PausableInternalImpl = PausableComponent::InternalImpl<ContractState>;
 
     // Constants
-    const CREATION_FEE_CAP_DEFAULT: u256 = 199_000_000; // $199 in USDC (6 decimals)
-    const CREATION_FEE_BPS_DEFAULT: u16 = 100;          // 1%
-    const REPAYMENT_FEE_BPS_DEFAULT: u16 = 50;          // 0.5%
+    // Fees default to zero. The first placement charges neither a creation
+    // nor a repayment fee, and a fee that has to be switched off after deploy
+    // is a fee that gets charged by accident in between. `set_fees` can still
+    // raise them later; the cap bounds the creation fee once it is non-zero.
+    //
+    // Note for anyone changing these: `repayment_fee_bps` is read at
+    // `create_pool` and written into the pool, so it is fixed for the life of
+    // every pool created afterwards. Changing it here does not affect pools
+    // that already exist.
+    const CREATION_FEE_CAP_DEFAULT: u256 = 199_000_000; // $199 ceiling if ever enabled
+    const CREATION_FEE_BPS_DEFAULT: u16 = 0;
+    const REPAYMENT_FEE_BPS_DEFAULT: u16 = 0;
     const BPS_DENOMINATOR: u256 = 10_000;
+    // Bounded so one call cannot exceed a block's step limit and revert the
+    // whole batch. Fifty storage writes plus events sits well inside it.
+    const MAX_AUTHORIZATION_BATCH: u32 = 50;
 
     #[storage]
     struct Storage {
@@ -48,6 +63,9 @@ pub mod PoolFactory {
         creation_fee_cap: u256,
         creation_fee_bps: u16,
         repayment_fee_bps: u16,
+        // Lender allowlist. Read by every pool on every deposit.
+        lp_authorized: Map<ContractAddress, bool>,
+        compliance_officer: ContractAddress,
         // Pool registry
         pool_count: u64,
         pools: Map<u64, ContractAddress>,
@@ -65,6 +83,25 @@ pub mod PoolFactory {
         FeesUpdated: FeesUpdated,
         PlatformWalletUpdated: PlatformWalletUpdated,
         PoolClassHashUpdated: PoolClassHashUpdated,
+        LpAuthorizationChanged: LpAuthorizationChanged,
+        ComplianceOfficerChanged: ComplianceOfficerChanged,
+    }
+
+    /// Emitted on every authorization change. Not telemetry: the off-chain
+    /// system needs this to prove its own records agree with the chain, and
+    /// the chain is what actually gates a deposit.
+    #[derive(Drop, starknet::Event)]
+    pub struct LpAuthorizationChanged {
+        #[key]
+        pub lp: ContractAddress,
+        pub authorized: bool,
+        pub by: ContractAddress,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct ComplianceOfficerChanged {
+        pub previous: ContractAddress,
+        pub current: ContractAddress,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -124,6 +161,11 @@ pub mod PoolFactory {
         self.usdc_address.write(usdc_address);
         self.credit_pool_class_hash.write(credit_pool_class_hash);
 
+        // The owner holds compliance until it is delegated. Leaving this
+        // unset would mean nobody can authorize a lender and every pool is
+        // unusable until someone notices.
+        self.compliance_officer.write(owner);
+
         // Set default fees
         self.creation_fee_cap.write(CREATION_FEE_CAP_DEFAULT);
         self.creation_fee_bps.write(CREATION_FEE_BPS_DEFAULT);
@@ -143,6 +185,8 @@ pub mod PoolFactory {
             interval_days: u32,
             funding_deadline: u64,
             data_room_hash: felt252,
+            max_lenders_limit: u32,
+            min_deposit_amount: u256,
         ) -> ContractAddress {
             // Check not paused
             self.pausable.assert_not_paused();
@@ -174,28 +218,31 @@ pub mod PoolFactory {
             let salt: felt252 = pedersen(pool_count.into(), caller.into());
 
             // Deploy with empty constructor data
-            let (pool_address, _) = deploy_syscall(
-                class_hash,
-                salt,
-                array![].span(),
-                false
-            ).unwrap_syscall();
+            let (pool_address, _) = deploy_syscall(class_hash, salt, array![].span(), false)
+                .unwrap_syscall();
 
             // Initialize the pool
             let pool = ICreditPoolDispatcher { contract_address: pool_address };
-            pool.initialize(
-                get_contract_address(),
-                caller,
-                self.usdc_address.read(),
-                self.platform_wallet.read(),
-                self.repayment_fee_bps.read(),
-                cap_amount,
-                rate_bps,
-                duration_days,
-                interval_days,
-                funding_deadline,
-                data_room_hash,
-            );
+            pool
+                .initialize(
+                    get_contract_address(),
+                    caller,
+                    self.usdc_address.read(),
+                    self.platform_wallet.read(),
+                    self.repayment_fee_bps.read(),
+                    cap_amount,
+                    rate_bps,
+                    duration_days,
+                    interval_days,
+                    funding_deadline,
+                    data_room_hash,
+                    max_lenders_limit,
+                    min_deposit_amount,
+                    // Always on for factory-created pools. A placement that can be
+                    // created without its eligibility gate is a placement that
+                    // will be, eventually, by accident.
+                    true,
+                );
 
             // Register pool
             self.pools.write(pool_count, pool_address);
@@ -203,17 +250,20 @@ pub mod PoolFactory {
             self.pool_count.write(pool_count + 1);
 
             // Emit event
-            self.emit(PoolCreated {
-                pool_address,
-                founder: caller,
-                cap_amount,
-                rate_bps,
-                duration_days,
-                interval_days,
-                funding_deadline,
-                creation_fee,
-                timestamp,
-            });
+            self
+                .emit(
+                    PoolCreated {
+                        pool_address,
+                        founder: caller,
+                        cap_amount,
+                        rate_bps,
+                        duration_days,
+                        interval_days,
+                        funding_deadline,
+                        creation_fee,
+                        timestamp,
+                    },
+                );
 
             pool_address
         }
@@ -289,12 +339,60 @@ pub mod PoolFactory {
             }
         }
 
+        fn set_lp_authorization(ref self: ContractState, lp: ContractAddress, authorized: bool) {
+            self._assert_only_compliance();
+            self._set_lp_authorization(lp, authorized);
+        }
+
+        fn set_lp_authorization_batch(
+            ref self: ContractState, lps: Span<ContractAddress>, authorized: bool,
+        ) {
+            self._assert_only_compliance();
+            let len: u32 = lps.len();
+            assert(len <= MAX_AUTHORIZATION_BATCH, 'Batch too large');
+            let mut i: u32 = 0;
+            while i < len {
+                self._set_lp_authorization(*lps.at(i), authorized);
+                i += 1;
+            };
+        }
+
+        fn is_authorized(self: @ContractState, lp: ContractAddress) -> bool {
+            self.lp_authorized.read(lp)
+        }
+
+        fn set_compliance_officer(ref self: ContractState, officer: ContractAddress) {
+            self.ownable.assert_only_owner();
+            assert(!officer.is_zero(), 'Invalid compliance officer');
+            let previous = self.compliance_officer.read();
+            self.compliance_officer.write(officer);
+            self.emit(ComplianceOfficerChanged { previous, current: officer });
+        }
+
+        fn get_compliance_officer(self: @ContractState) -> ContractAddress {
+            self.compliance_officer.read()
+        }
+
         fn get_repayment_fee_bps(self: @ContractState) -> u16 {
             self.repayment_fee_bps.read()
         }
     }
 
     // Internal functions
+    #[generate_trait]
+    impl AllowlistInternalImpl of AllowlistInternalTrait {
+        fn _assert_only_compliance(self: @ContractState) {
+            let caller = get_caller_address();
+            assert(caller == self.compliance_officer.read(), 'Not compliance officer');
+        }
+
+        fn _set_lp_authorization(ref self: ContractState, lp: ContractAddress, authorized: bool) {
+            assert(!lp.is_zero(), 'Invalid lender address');
+            self.lp_authorized.write(lp, authorized);
+            self.emit(LpAuthorizationChanged { lp, authorized, by: get_caller_address() });
+        }
+    }
+
     #[generate_trait]
     impl InternalImpl of InternalTrait {
         fn _calculate_creation_fee(self: @ContractState, cap_amount: u256) -> u256 {

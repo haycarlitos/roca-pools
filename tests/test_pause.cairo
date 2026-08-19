@@ -1,17 +1,12 @@
-use starknet::ContractAddress;
-use starknet::contract_address_const;
-use snforge_std_deprecated::{
-    declare, ContractClassTrait, DeclareResultTrait,
-    start_cheat_caller_address, stop_cheat_caller_address,
-    start_cheat_block_timestamp, stop_cheat_block_timestamp,
-};
-
 use seedless_contracts::interfaces::i_credit_pool::{
-    ICreditPoolDispatcher, ICreditPoolDispatcherTrait, PoolStatus
+    ICreditPoolDispatcher, ICreditPoolDispatcherTrait, PoolStatus,
 };
-use seedless_contracts::mocks::mock_erc20::{
-    IMockERC20Dispatcher, IMockERC20DispatcherTrait
+use seedless_contracts::mocks::mock_erc20::{IMockERC20Dispatcher, IMockERC20DispatcherTrait};
+use snforge_std_deprecated::{
+    ContractClassTrait, DeclareResultTrait, declare, start_cheat_block_timestamp,
+    start_cheat_caller_address, stop_cheat_block_timestamp, stop_cheat_caller_address,
 };
+use starknet::{ContractAddress, contract_address_const};
 
 // Constants
 const USDC_DECIMALS: u8 = 6;
@@ -59,19 +54,23 @@ fn deploy_pool() -> ICreditPoolDispatcher {
 
 /// Initialize pool with standard test parameters
 fn initialize_pool(pool: ICreditPoolDispatcher, usdc: ContractAddress) {
-    pool.initialize(
-        FACTORY(),
-        FOUNDER(),
-        usdc,
-        PLATFORM_WALLET(),
-        50, // 0.5% repayment fee
-        10_000 * ONE_USDC, // $10,000 cap
-        1000, // 10% annual rate
-        365, // 1 year duration
-        30, // monthly interval
-        FUNDING_DEADLINE,
-        'DATA_ROOM_HASH',
-    );
+    pool
+        .initialize(
+            FACTORY(),
+            FOUNDER(),
+            usdc,
+            PLATFORM_WALLET(),
+            50, // 0.5% repayment fee
+            10_000 * ONE_USDC, // $10,000 cap
+            1000, // 10% annual rate
+            365, // 1 year duration
+            30, // monthly interval
+            FUNDING_DEADLINE,
+            'DATA_ROOM_HASH',
+            100,
+            0,
+            false,
+        );
 }
 
 // ============================================
@@ -456,19 +455,23 @@ fn test_can_expire_when_paused() {
 
     // Use short deadline
     let short_deadline: u64 = SECONDS_PER_DAY;
-    pool.initialize(
-        FACTORY(),
-        FOUNDER(),
-        usdc.contract_address,
-        PLATFORM_WALLET(),
-        50,
-        10_000 * ONE_USDC,
-        1000,
-        365,
-        30,
-        short_deadline,
-        'DATA_ROOM_HASH',
-    );
+    pool
+        .initialize(
+            FACTORY(),
+            FOUNDER(),
+            usdc.contract_address,
+            PLATFORM_WALLET(),
+            50,
+            10_000 * ONE_USDC,
+            1000,
+            365,
+            30,
+            short_deadline,
+            'DATA_ROOM_HASH',
+            100,
+            0,
+            false,
+        );
 
     // Activate pool
     start_cheat_caller_address(pool_address, FOUNDER());

@@ -1,11 +1,11 @@
 #[starknet::contract]
 pub mod MockERC20 {
-    use starknet::{ContractAddress, get_caller_address};
-    use starknet::storage::{
-        StoragePointerReadAccess, StoragePointerWriteAccess,
-        Map, StorageMapReadAccess, StorageMapWriteAccess
-    };
     use core::num::traits::Zero;
+    use starknet::storage::{
+        Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
+        StoragePointerWriteAccess,
+    };
+    use starknet::{ContractAddress, get_caller_address};
 
     #[storage]
     struct Storage {
@@ -43,12 +43,7 @@ pub mod MockERC20 {
     }
 
     #[constructor]
-    fn constructor(
-        ref self: ContractState,
-        name: felt252,
-        symbol: felt252,
-        decimals: u8,
-    ) {
+    fn constructor(ref self: ContractState, name: felt252, symbol: felt252, decimals: u8) {
         self.name.write(name);
         self.symbol.write(symbol);
         self.decimals.write(decimals);
@@ -77,7 +72,9 @@ pub mod MockERC20 {
             self.balances.read(account)
         }
 
-        fn allowance(self: @ContractState, owner: ContractAddress, spender: ContractAddress) -> u256 {
+        fn allowance(
+            self: @ContractState, owner: ContractAddress, spender: ContractAddress,
+        ) -> u256 {
             self.allowances.read((owner, spender))
         }
 
@@ -137,7 +134,6 @@ pub mod MockERC20 {
         }
     }
 }
-
 use starknet::ContractAddress;
 
 #[starknet::interface]
@@ -150,10 +146,7 @@ pub trait IMockERC20<TContractState> {
     fn allowance(self: @TContractState, owner: ContractAddress, spender: ContractAddress) -> u256;
     fn transfer(ref self: TContractState, recipient: ContractAddress, amount: u256) -> bool;
     fn transfer_from(
-        ref self: TContractState,
-        sender: ContractAddress,
-        recipient: ContractAddress,
-        amount: u256,
+        ref self: TContractState, sender: ContractAddress, recipient: ContractAddress, amount: u256,
     ) -> bool;
     fn approve(ref self: TContractState, spender: ContractAddress, amount: u256) -> bool;
     fn mint(ref self: TContractState, to: ContractAddress, amount: u256);

@@ -4,20 +4,20 @@ use starknet::ContractAddress;
 #[derive(Drop, Serde, Copy, PartialEq, starknet::Store, Default)]
 pub enum PoolStatus {
     #[default]
-    Pending,    // Initial state, accepting deposits, not yet activated
-    Active,     // Activated by founder, accepting deposits
-    Borrowed,   // Founder has borrowed funds
-    Completed,  // Fully repaid
-    Defaulted,  // Marked as defaulted
-    Expired,    // Funding deadline passed without borrowing
-    Cancelled,  // Founder cancelled the pool
+    Pending, // Initial state, accepting deposits, not yet activated
+    Active, // Activated by founder, accepting deposits
+    Borrowed, // Founder has borrowed funds
+    Completed, // Fully repaid
+    Defaulted, // Marked as defaulted
+    Expired, // Funding deadline passed without borrowing
+    Cancelled // Founder cancelled the pool
 }
 
 /// Lender position in the pool
 #[derive(Drop, Serde, Copy, starknet::Store)]
 pub struct LenderPosition {
-    pub deposited: u256,      // Total deposited by lender
-    pub withdrawn: u256,      // Total withdrawn by lender
+    pub deposited: u256, // Total deposited by lender
+    pub withdrawn: u256 // Total withdrawn by lender
 }
 
 /// Full pool information
@@ -39,15 +39,15 @@ pub struct PoolInfo {
     // Mutable state
     pub status: PoolStatus,
     pub current_rate_bps: u16,
-    pub borrow_rate_bps: u16,      // Rate locked at borrow time
+    pub borrow_rate_bps: u16, // Rate locked at borrow time
     pub total_deposited: u256,
     pub total_borrowed: u256,
     pub total_repaid: u256,
-    pub principal_repaid: u256,    // Principal portion repaid
+    pub principal_repaid: u256, // Principal portion repaid
     pub borrowed_at: u64,
-    pub last_repayment_at: u64,    // Last repayment timestamp (for overdue detection)
+    pub last_repayment_at: u64, // Last repayment timestamp (for overdue detection)
     pub lender_count: u32,
-    pub paused: bool,              // Emergency pause status
+    pub paused: bool // Emergency pause status
 }
 
 /// Withdrawal calculation result
@@ -74,6 +74,16 @@ pub trait ICreditPool<TContractState> {
         interval_days: u32,
         funding_deadline: u64,
         data_room_hash: felt252,
+        /// Maximum distinct lenders. Enforced when a lender JOINS the roster,
+        /// and a full pre-borrow exit returns the slot.
+        max_lenders_limit: u32,
+        /// Minimum first deposit. 0 disables it. A lender may always deposit
+        /// exactly the remaining headroom even if it is below this.
+        min_deposit_amount: u256,
+        /// Gate deposits on the factory's lender allowlist. `create_pool`
+        /// always passes true; the parameter exists so a pool can be deployed
+        /// standalone in tests without a live factory behind it.
+        allowlist_enabled: bool,
     );
 
     /// Deposit USDC into the pool (lenders)
@@ -130,4 +140,13 @@ pub trait ICreditPool<TContractState> {
 
     /// Check if address is a lender
     fn is_lender(self: @TContractState, address: ContractAddress) -> bool;
+
+    /// Maximum distinct lenders this pool will admit
+    fn get_max_lenders_limit(self: @TContractState) -> u32;
+
+    /// Minimum first deposit, 0 if none
+    fn get_min_deposit_amount(self: @TContractState) -> u256;
+
+    /// Whether deposits are gated on the factory allowlist
+    fn is_allowlist_enabled(self: @TContractState) -> bool;
 }

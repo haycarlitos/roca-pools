@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Versions are pinned to .tool-versions on purpose. A different compiler
+      # produces a different class hash from identical source, which would make
+      # a "reproduce the deployed class" check silently meaningless.
+      - name: Install Scarb
+        uses: software-mansion/setup-scarb@v1
+        with:
+          scarb-version: "2.11.4"
+
+      - name: Install Starknet Foundry
+        uses: foundry-rs/setup-snfoundry@v3
+        with:
+          starknet-foundry-version: "0.53.0"
+
+      - name: scarb build
+        run: scarb build
+
+      - name: scarb fmt --check
+        run: scarb fmt --check
+
+      - name: snforge test
+        run: snforge test
+
+      # Named gate. The full suite already covers these, but a separate step
+      # means a PR that breaks a finding's regression test fails with the word
+      # "audit" in the job name rather than as one red line among a hundred.
+      - name: Audit regression gate
+        run: snforge test audit_replication
+
+      - name: Placement limit gate
+        run: snforge test test_placement_limits

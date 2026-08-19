@@ -20,6 +20,24 @@ LP app (production): https://rocabeneficios.vercel.app, where investors
 onboard with a **passkey** (no seed phrase, no gas) via
 [Chipi](https://chipipay.com) wallet infrastructure.
 
+
+## Security and audit
+
+| Document | For |
+|---|---|
+| [SECURITY.md](SECURITY.md) | Reporting a vulnerability. Scope, timelines, what counts. |
+| [AUDIT.md](AUDIT.md) | Auditors. Invariants, findings, coverage, threat model. |
+| [audits/](audits/) | Every review and our response, published whether or not it flatters us. |
+| [docs/audit-mapping.md](docs/audit-mapping.md) | Findings from another codebase's audits, walked against ours. |
+| [docs/owasp-scs-top10.md](docs/owasp-scs-top10.md) | OWASP Smart Contract Top 10 2026, category by category. |
+| [docs/for-investors.md](docs/for-investors.md) | Investors. What the code guarantees and what it does not. |
+| [docs/compliance.md](docs/compliance.md) | Counsel and regulators. Enforced on chain vs human control. |
+
+**No independent external audit has been performed.** Internal review only. Three
+findings were found and fixed before any investor funds entered a pool, and two
+more were found in new code by replicating another project's audit list. All are
+documented with the tests that reproduce them.
+
 ## How a pool works
 
 ```
