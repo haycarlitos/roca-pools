@@ -319,3 +319,82 @@ fn test_one_revocation_covers_every_pool() {
     assert(pool_a.is_allowlist_enabled(), 'Pool A gated');
     assert(pool_b.is_allowlist_enabled(), 'Pool B gated');
 }
+
+// ============================================================================
+// Reusing an approved investor base across pools
+// ============================================================================
+// The operational question this design exists to answer: when pool 1 closes and
+// pool 2 opens, does the whole investor base have to be onboarded again?
+//
+// No. Authorization is held on the factory, not stamped onto a pool at
+// creation, so it applies to pools that did not exist when it was granted.
+// Terms are permanent per pool, so a new term means a new pool, and that is the
+// operation this makes cheap.
+
+#[test]
+fn test_authorization_granted_today_covers_a_pool_created_tomorrow() {
+    let usdc = deploy_usdc();
+    let factory = deploy_factory(usdc.contract_address);
+
+    // Approve the investor base first. No pool exists yet.
+    start_cheat_caller_address(factory.contract_address, OWNER());
+    factory.set_lp_authorization_batch(array![LENDER1(), LENDER2()].span(), true);
+    stop_cheat_caller_address(factory.contract_address);
+
+    // Pool created afterwards, with completely different terms.
+    let pool = create_pool(factory, 25, 0);
+
+    // Both deposit with no further compliance step.
+    try_deposit(usdc, pool, LENDER1(), 100 * ONE_USDC);
+    try_deposit(usdc, pool, LENDER2(), 100 * ONE_USDC);
+
+    assert(pool.get_pool_info().lender_count == 2, 'Both got in');
+    assert(pool.get_pool_info().total_deposited == 200 * ONE_USDC, 'Both deposits landed');
+}
+
+#[test]
+fn test_the_same_investor_base_carries_across_successive_pools() {
+    // Pool 1 fills and its term is fixed forever. Pool 2 opens with different
+    // terms and reuses the same approved base, with no re-onboarding.
+    let usdc = deploy_usdc();
+    let factory = deploy_factory(usdc.contract_address);
+
+    start_cheat_caller_address(factory.contract_address, OWNER());
+    factory.set_lp_authorization(LENDER1(), true);
+    stop_cheat_caller_address(factory.contract_address);
+
+    let pool_one = create_pool(factory, 25, 0);
+    try_deposit(usdc, pool_one, LENDER1(), 100 * ONE_USDC);
+
+    // A second pool, different roster cap and a minimum ticket this time.
+    let pool_two = create_pool(factory, 5, 50 * ONE_USDC);
+    try_deposit(usdc, pool_two, LENDER1(), 100 * ONE_USDC);
+
+    assert(pool_one.get_pool_info().total_deposited == 100 * ONE_USDC, 'Pool 1 funded');
+    assert(pool_two.get_pool_info().total_deposited == 100 * ONE_USDC, 'Pool 2 funded');
+    // Independent rosters: the cap is per pool, the approval is not.
+    assert(pool_one.get_max_lenders_limit() == 25, 'Pool 1 keeps its own limit');
+    assert(pool_two.get_max_lenders_limit() == 5, 'Pool 2 keeps its own limit');
+}
+
+#[test]
+#[should_panic(expected: ('Lender not authorized',))]
+fn test_revoking_between_pools_also_closes_the_new_one() {
+    // The mirror. Reuse is automatic in both directions: someone removed from
+    // the base cannot enter the next pool either.
+    let usdc = deploy_usdc();
+    let factory = deploy_factory(usdc.contract_address);
+
+    start_cheat_caller_address(factory.contract_address, OWNER());
+    factory.set_lp_authorization(LENDER1(), true);
+    stop_cheat_caller_address(factory.contract_address);
+    let pool_one = create_pool(factory, 25, 0);
+    try_deposit(usdc, pool_one, LENDER1(), 100 * ONE_USDC);
+
+    start_cheat_caller_address(factory.contract_address, OWNER());
+    factory.set_lp_authorization(LENDER1(), false);
+    stop_cheat_caller_address(factory.contract_address);
+
+    let pool_two = create_pool(factory, 25, 0);
+    try_deposit(usdc, pool_two, LENDER1(), 100 * ONE_USDC);
+}
