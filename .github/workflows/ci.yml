@@ -10,6 +10,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # checkout injects an auth extraheader for github.com into git config.
+          # Scarb shells out to git to fetch its own dependencies, and that
+          # header leaks into those fetches.
+          persist-credentials: false
+
+      # Diagnostic: if the dependency fetch fails, we want git's own error
+      # rather than scarb's "exit status: 128".
+      - name: Check git can reach the dependency repos
+        run: |
+          git --version
+          git ls-remote --tags https://github.com/OpenZeppelin/cairo-contracts.git v1.0.0
+          git ls-remote --tags https://github.com/foundry-rs/starknet-foundry.git v0.53.0
 
       # Versions are pinned to .tool-versions on purpose. A different compiler
       # produces a different class hash from identical source, which would make
