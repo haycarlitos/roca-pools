@@ -112,6 +112,23 @@ cannot be patched.** The response is to pause it, let it expire, let investors
 withdraw, and deploy a corrected class for new pools. New pools use the new
 class; existing pools keep the class they were born with.
 
+## Scope of the investor allowlist
+
+The allowlist is a single boolean map held on the factory. It records whether an
+address may deposit; it does not record an investor category.
+
+**Every pool created from a given factory therefore shares one investor base.**
+A pool can choose whether to consult the list, not which list.
+
+This is sufficient while all pools from a factory represent the same kind of
+offering, and it is stated here because it is a real boundary rather than an
+implementation detail: two placements with different eligibility rules cannot be
+separated by this mechanism. Separating them requires either a distinct factory
+per placement type, or contract changes introducing investor tiers.
+
+Operationally, the rule is that a pool's eligibility rules must match every other
+pool on the same factory.
+
 ## Current limitations
 
 Written down because a compliance document that lists only strengths is a
