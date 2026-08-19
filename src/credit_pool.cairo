@@ -512,10 +512,10 @@ pub mod CreditPool {
             // lenders than marking one honestly, which is the wrong incentive
             // to put in a contract.
             //
-            // The status stays Defaulted. It is a historical fact, not a
-            // balance, and a recovery does not undo it. Lenders withdraw
-            // pro-rata of total_repaid in both states, so the payout path is
-            // identical either way.
+            // The status stays Defaulted, including after a FULL recovery: the
+            // completion branch below is gated on Borrowed for that reason.
+            // Lenders withdraw pro-rata of total_repaid in both states, so the
+            // label costs them nothing and preserves what actually happened.
             let status = self.status.read();
             assert(
                 status == PoolStatus::Borrowed || status == PoolStatus::Defaulted,
@@ -598,8 +598,21 @@ pub mod CreditPool {
                 total_owed - new_total_repaid
             };
 
-            // Check if fully repaid
-            if remaining == 0 {
+            // Fully repaid closes a performing pool. It does NOT reopen a
+            // defaulted one.
+            //
+            // A default is a fact about how the borrower performed, and paying
+            // late does not make the payment on time. Letting a full recovery
+            // relabel the pool Completed would erase that from the only field
+            // most readers look at, so a lender comparing "three pools
+            // completed" against "two completed, one defaulted then recovered"
+            // would be shown the wrong history. The events keep the record
+            // either way, but status is what gets read.
+            //
+            // Nothing about the money depends on this: Defaulted and Completed
+            // take the same pro-rata branch in `_calculate_withdrawal`, so
+            // lenders are paid identically whichever label the pool carries.
+            if remaining == 0 && status == PoolStatus::Borrowed {
                 self._set_status(PoolStatus::Completed);
             }
 

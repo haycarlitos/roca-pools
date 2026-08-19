@@ -76,6 +76,14 @@ them were never written down before, and one of those turned out to be false.
 9. `Pending -> Active -> Borrowed -> Completed` is the only path through which
    money moves. `Cancelled`, `Expired` and `Defaulted` are terminal and all
    three leave withdrawal open.
+
+   `Defaulted` accepts repayment so a recovery can still reach lenders, but it
+   does **not** transition onward: a full recovery leaves the pool `Defaulted`
+   rather than relabelling it `Completed`. Paying late does not make a payment
+   on time, and `status` is the field most readers use to judge performance.
+   The 2026-08-19 delta review found the transition initially reachable; it is
+   now gated on `Borrowed` and covered by
+   `test_a_full_recovery_does_not_relabel_a_defaulted_pool`.
 10. `borrow` may happen at most once, and takes the entire balance.
 11. `lower_rate` can only decrease. The rate is frozen into `borrow_rate_bps`
     at `borrow` time so later changes cannot alter an existing obligation.

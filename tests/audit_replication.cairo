@@ -751,3 +751,101 @@ fn test_initialize_now_enforces_the_same_fee_ceiling_as_the_factory() {
             false,
         );
 }
+
+// ===========================================================================
+// Delta re-review, 2026-08-19 — Low: Defaulted was no longer terminal
+// ===========================================================================
+// Widening `repay` to accept Defaulted also exposed repay's completion branch
+// to it, so a full recovery relabelled the pool Completed. That contradicted
+// both invariant 9 and the comment sitting directly above the widened guard.
+//
+// Fixed by keeping the label rather than by rewording the invariant. A default
+// is a fact about how the borrower performed, and paying late does not make the
+// payment on time; erasing it from the field most readers look at would show a
+// lender the wrong history.
+
+#[test]
+fn test_a_full_recovery_does_not_relabel_a_defaulted_pool() {
+    let usdc = deploy_usdc();
+    let pool = deploy_pool();
+    init_pool(pool, usdc.contract_address);
+    start_cheat_caller_address(pool.contract_address, FOUNDER());
+    pool.activate();
+    stop_cheat_caller_address(pool.contract_address);
+
+    deposit_as(usdc, pool, LENDER1(), 1_000 * ONE_USDC);
+    start_cheat_caller_address(pool.contract_address, FOUNDER());
+    pool.borrow();
+    stop_cheat_caller_address(pool.contract_address);
+
+    start_cheat_block_timestamp(pool.contract_address, 400 * DAY);
+    start_cheat_caller_address(pool.contract_address, contract_address_const::<'FACTORY'>());
+    pool.mark_defaulted();
+    stop_cheat_caller_address(pool.contract_address);
+
+    // Repay well past everything owed, in one go.
+    // Exactly everything owed: 1000 principal at 10% over the full term.
+    usdc.mint(FOUNDER(), 1_100 * ONE_USDC);
+    start_cheat_caller_address(usdc.contract_address, FOUNDER());
+    usdc.approve(pool.contract_address, 1_100 * ONE_USDC);
+    stop_cheat_caller_address(usdc.contract_address);
+    start_cheat_caller_address(pool.contract_address, FOUNDER());
+    pool.repay(1_100 * ONE_USDC);
+    stop_cheat_caller_address(pool.contract_address);
+
+    assert(pool.get_pool_info().status == PoolStatus::Defaulted, 'Default is not erased');
+
+    // And the lender is still made whole, which is the point: the label costs
+    // them nothing.
+    start_cheat_caller_address(pool.contract_address, LENDER1());
+    pool.withdraw();
+    stop_cheat_caller_address(pool.contract_address);
+    assert(usdc.balance_of(LENDER1()) >= 1_000 * ONE_USDC, 'Lender recovered principal');
+}
+
+#[test]
+fn test_a_performing_pool_still_completes_normally() {
+    // The guard must not have broken the ordinary path.
+    //
+    // Zero repayment fee here on purpose: the fee is taken off the top and only
+    // the net credits `total_repaid`, so with a fee the founder has to send
+    // more than the amount owed to clear it. That is a separate behaviour and
+    // not what this test is about.
+    let usdc = deploy_usdc();
+    let pool = deploy_pool();
+    pool
+        .initialize(
+            contract_address_const::<'FACTORY'>(),
+            FOUNDER(),
+            usdc.contract_address,
+            PLATFORM(),
+            0,
+            10_000 * ONE_USDC,
+            1000,
+            365,
+            30,
+            30 * DAY,
+            'HASH',
+            100,
+            0,
+            false,
+        );
+    start_cheat_caller_address(pool.contract_address, FOUNDER());
+    pool.activate();
+    stop_cheat_caller_address(pool.contract_address);
+
+    deposit_as(usdc, pool, LENDER1(), 1_000 * ONE_USDC);
+    start_cheat_caller_address(pool.contract_address, FOUNDER());
+    pool.borrow();
+    stop_cheat_caller_address(pool.contract_address);
+
+    usdc.mint(FOUNDER(), 1_100 * ONE_USDC);
+    start_cheat_caller_address(usdc.contract_address, FOUNDER());
+    usdc.approve(pool.contract_address, 1_100 * ONE_USDC);
+    stop_cheat_caller_address(usdc.contract_address);
+    start_cheat_caller_address(pool.contract_address, FOUNDER());
+    pool.repay(1_100 * ONE_USDC);
+    stop_cheat_caller_address(pool.contract_address);
+
+    assert(pool.get_pool_info().status == PoolStatus::Completed, 'Performing pool completes');
+}
