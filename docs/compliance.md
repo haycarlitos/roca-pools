@@ -3,6 +3,10 @@
 For counsel, auditors and regulators. Describes what the contracts **enforce**,
 what they **record**, and what remains a human control.
 
+This document is deliberately limited to statements Roca would put in writing to
+a regulator. Operational detail (named key holders, screening schedules, internal
+control gaps) lives in a private document and is available under NDA on request.
+
 Nothing here is legal advice or a legal opinion. Statutory analysis is
 counsel's; this document only states accurately what the software does, so that
 analysis rests on facts rather than on a description written by someone selling

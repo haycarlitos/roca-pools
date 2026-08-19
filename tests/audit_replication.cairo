@@ -662,3 +662,92 @@ fn test_registry_replay_by_a_second_servicer() {
     start_cheat_caller_address(reg.contract_address, STRANGER());
     reg.register_batch(2, 'CEP', 'ROOT', 100);
 }
+
+// ===========================================================================
+// External audit, 2026-08-19 — Low: Defaulted blocked recovery distribution
+// ===========================================================================
+// The auditor's point was an incentive problem, not a safety one: marking a
+// pool defaulted permanently blocked `repay`, so a recovery collected from the
+// loan book could never reach lenders through the pool. That made never
+// marking a default strictly better for lenders than marking one honestly.
+
+#[test]
+fn test_a_defaulted_pool_can_still_receive_and_distribute_a_recovery() {
+    let usdc = deploy_usdc();
+    let pool = deploy_pool();
+    init_pool(pool, usdc.contract_address);
+    start_cheat_caller_address(pool.contract_address, FOUNDER());
+    pool.activate();
+    stop_cheat_caller_address(pool.contract_address);
+
+    deposit_as(usdc, pool, LENDER1(), 1_000 * ONE_USDC);
+    start_cheat_caller_address(pool.contract_address, FOUNDER());
+    pool.borrow();
+    stop_cheat_caller_address(pool.contract_address);
+
+    // Long past the term, the factory marks it defaulted.
+    start_cheat_block_timestamp(pool.contract_address, 400 * DAY);
+    start_cheat_caller_address(pool.contract_address, contract_address_const::<'FACTORY'>());
+    pool.mark_defaulted();
+    stop_cheat_caller_address(pool.contract_address);
+
+    // Months later a recovery is collected. It must still be distributable.
+    usdc.mint(FOUNDER(), 400 * ONE_USDC);
+    start_cheat_caller_address(usdc.contract_address, FOUNDER());
+    usdc.approve(pool.contract_address, 400 * ONE_USDC);
+    stop_cheat_caller_address(usdc.contract_address);
+    start_cheat_caller_address(pool.contract_address, FOUNDER());
+    pool.repay(400 * ONE_USDC);
+    stop_cheat_caller_address(pool.contract_address);
+
+    // The default stands as a historical fact; the money still reaches lenders.
+    let info = pool.get_pool_info();
+    assert(info.status == PoolStatus::Defaulted, 'Still defaulted');
+
+    start_cheat_caller_address(pool.contract_address, LENDER1());
+    pool.withdraw();
+    stop_cheat_caller_address(pool.contract_address);
+    assert(usdc.balance_of(LENDER1()) > 0, 'Recovery reached the lender');
+}
+
+#[test]
+#[should_panic(expected: ('Pool not borrowed',))]
+fn test_repay_is_still_refused_before_the_money_is_drawn() {
+    // The widened guard must not become "any state".
+    let usdc = deploy_usdc();
+    let pool = deploy_pool();
+    init_pool(pool, usdc.contract_address);
+    start_cheat_caller_address(pool.contract_address, FOUNDER());
+    pool.activate();
+    pool.repay(1 * ONE_USDC);
+}
+
+// ===========================================================================
+// External audit, 2026-08-19 — Info: fee bounds disagreed across contracts
+// ===========================================================================
+
+#[test]
+#[should_panic(expected: ('Repayment fee max 10%',))]
+fn test_initialize_now_enforces_the_same_fee_ceiling_as_the_factory() {
+    // Unreachable through create_pool, which passes the factory's capped value,
+    // but a directly deployed pool could take a 100% repayment fee.
+    let usdc = deploy_usdc();
+    let pool = deploy_pool();
+    pool
+        .initialize(
+            contract_address_const::<'FACTORY'>(),
+            FOUNDER(),
+            usdc.contract_address,
+            PLATFORM(),
+            5000,
+            10_000 * ONE_USDC,
+            1000,
+            365,
+            30,
+            30 * DAY,
+            'HASH',
+            100,
+            0,
+            false,
+        );
+}

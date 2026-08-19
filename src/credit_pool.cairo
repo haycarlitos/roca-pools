@@ -216,7 +216,11 @@ pub mod CreditPool {
             // Validate numeric parameters
             assert(cap_amount > 0, 'Cap must be positive');
             assert(rate_bps > 0 && rate_bps <= 10000, 'Invalid rate');
-            assert(repayment_fee_bps <= 10000, 'Invalid repayment fee');
+            // Matches PoolFactory.set_fees, which caps this at 1000. The two
+            // bounds disagreeing was unreachable through create_pool, since the
+            // factory passes its own capped value, but a pool deployed directly
+            // could have been initialized with a 100% repayment fee.
+            assert(repayment_fee_bps <= 1000, 'Repayment fee max 10%');
             assert(duration_days > 0, 'Duration must be positive');
             assert(interval_days > 0, 'Interval must be positive');
             assert(interval_days <= duration_days, 'Interval exceeds duration');
@@ -500,9 +504,23 @@ pub mod CreditPool {
             // Only founder can repay
             assert(caller == self.founder.read(), 'Only founder');
 
-            // Must be Borrowed status
+            // Borrowed, or Defaulted. Accepting repayment after a default is
+            // deliberate: `mark_defaulted` is a statement about the borrower,
+            // and blocking repayment afterwards would mean a recovery collected
+            // from the loan book could never be distributed to lenders through
+            // the pool. That made never marking a default strictly better for
+            // lenders than marking one honestly, which is the wrong incentive
+            // to put in a contract.
+            //
+            // The status stays Defaulted. It is a historical fact, not a
+            // balance, and a recovery does not undo it. Lenders withdraw
+            // pro-rata of total_repaid in both states, so the payout path is
+            // identical either way.
             let status = self.status.read();
-            assert(status == PoolStatus::Borrowed, 'Pool not borrowed');
+            assert(
+                status == PoolStatus::Borrowed || status == PoolStatus::Defaulted,
+                'Pool not borrowed',
+            );
 
             assert(amount > 0, 'Amount must be positive');
 
