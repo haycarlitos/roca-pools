@@ -10,10 +10,13 @@ only appears once it is closed is a marketing artifact.
 |---|---|---|---|---|---|
 | 2026-08-18 | Roca, AI-assisted (Claude Opus 5) | Internal pre-audit self-review | [`../AUDIT.md`](../AUDIT.md) | Fixed in the same cycle, before any investor funds | 2 High + 1 Medium, all closed |
 | 2026-08-18 | Roca, AI-assisted | Cross-codebase finding replication | [`../docs/audit-mapping.md`](../docs/audit-mapping.md) | Both defects fixed same day | 2 found in new code |
+| 2026-08-18 | Independent, AI-assisted (Claude Fable 5) | Full on-chain review | [`2026-08-18-independent-claude-fable5-full-review.md`](2026-08-18-independent-claude-fable5-full-review.md) | Ready to declare; 1 Low acted on (see next row) | 0 Critical/High, 2 Low, 5 Info |
+| 2026-08-19 | Independent, AI-assisted (Claude Fable 5) | Delta re-review (repay after default) | [`2026-08-19-independent-claude-fable5-defaulted-repay-delta.md`](2026-08-19-independent-claude-fable5-defaulted-repay-delta.md) | Verdict holds; invariant 9 wording to be corrected | 0 Critical/High, 1 Low, 2 Info |
 
-**No independent external audit has been performed.** Saying so is the whole
-point of this file. Anyone describing these contracts as audited is overstating
-it, and that includes us.
+**No independent external audit by a human firm has been performed.** The reviews
+above are AI-assisted, adversarial, and published in full regardless of outcome,
+but they are not a substitute for a paid external audit. Anyone describing these
+contracts as audited is overstating it, and that includes us.
 
 ## Status
 
