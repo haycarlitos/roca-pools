@@ -70,8 +70,16 @@ fi
 echo "== toolchain =="
 while read -r tool want; do
   [[ "$tool" =~ ^#|^$ ]] && continue
-  if ! command -v "${tool%%-*}" >/dev/null 2>&1 && ! command -v "$tool" >/dev/null 2>&1; then
-    fail "$tool not installed (need $want) -> mise install"
+  # Map the .tool-versions name to the binary it actually installs. Splitting
+  # the name on a dash looked clever and asked for `starknet`, which is not a
+  # command, so a correctly installed toolchain reported as missing.
+  case "$tool" in
+    scarb)            probe=scarb  ;;
+    starknet-foundry) probe=sncast ;;
+    *)                probe="$tool";;
+  esac
+  if ! command -v "$probe" >/dev/null 2>&1; then
+    fail "$tool not installed (need $want; looked for '$probe') -> mise install"
     continue
   fi
   case "$tool" in
@@ -98,7 +106,7 @@ echo "== deployer account '$ACCOUNT' =="
 if ! command -v sncast >/dev/null 2>&1; then
   warn "sncast missing, cannot resolve the account address"
 else
-  ADDR="$(sncast account list 2>/dev/null | grep -A5 "^- $ACCOUNT" | sed -n 's/.*address: *\(0x[0-9a-fA-F]*\).*/\1/p' | head -1)"
+  ADDR="$( { sncast account list 2>/dev/null || true; } | grep -A5 "^- $ACCOUNT" | sed -n 's/.*address: *\(0x[0-9a-fA-F]*\).*/\1/p' | head -1 || true)"
   if [[ -z "$ADDR" ]]; then
     fail "no sncast account named '$ACCOUNT'"
     echo "       any funded wallet works. The declarer gets NO privileges:"
