@@ -107,4 +107,36 @@ pub trait IPoolFactory<TContractState> {
     /// within minutes of a sanctions hit should not also carry all of that.
     fn set_compliance_officer(ref self: TContractState, officer: ContractAddress);
     fn get_compliance_officer(self: @TContractState) -> ContractAddress;
+
+    /// Forwarders for the pool entrypoints that are gated on `caller == factory`.
+    ///
+    /// `CreditPool::unpause` and `CreditPool::mark_defaulted` both assert the
+    /// caller is the factory *contract*. Without a function here that makes the
+    /// factory the caller, neither is reachable by anyone: the owner is the
+    /// factory's owner, not the factory, so calling the pool directly reverts.
+    ///
+    /// For `unpause` that is not a missing feature but a stuck pool. A founder
+    /// may pause unilaterally (`caller == founder || caller == factory`) while
+    /// only the factory may lift it, so without the forwarder any paused pool
+    /// stays paused forever, with deposit, borrow and repay frozen. Withdrawal
+    /// stays open by design, so lenders can still exit — but the pool is dead.
+    ///
+    /// Owner-gated rather than compliance-gated: both are statements about a
+    /// borrower and the health of a placement, not about who may invest.
+
+    /// Lift a pause on a pool this factory deployed. Owner only.
+    fn unpause_pool(ref self: TContractState, pool: ContractAddress);
+
+    /// Pause a pool this factory deployed. Owner only.
+    ///
+    /// The pool already accepts the factory as a pauser; this is the missing
+    /// half that lets Roca stop a pool it did not found.
+    fn pause_pool(ref self: TContractState, pool: ContractAddress);
+
+    /// Declare a borrowed pool in default. Owner only.
+    ///
+    /// The pool enforces when this is permissible (term elapsed, or two
+    /// intervals without a payment). It does not stop repayment and it does not
+    /// stop withdrawal.
+    fn mark_pool_defaulted(ref self: TContractState, pool: ContractAddress);
 }

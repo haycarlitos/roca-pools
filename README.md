@@ -139,12 +139,13 @@ an already-made decision effective on chain.
 PoolFactory.create_pool(cap, rate_bps, duration, interval, deadline, data_room)
         │  whoever calls becomes the pool's `founder`
         ↓
-CreditPool (one per partner company)
+CreditPool (one per vintage — many employers per pool)
   LPs:      deposit(amount)            → pro-rata position, until cap / deadline
   Founder:  borrow()                   → draws capital to fund payroll loans
             repay(amount)              → returns principal + yield as repayments land
   LPs:      withdraw()                 → principal + accrued yield, as capital frees
-  Lifecycle: activate / cancel / expire / pause / unpause · lower_rate
+  Lifecycle: activate / cancel / expire / pause · lower_rate
+  Owner (via factory): unpause_pool / pause_pool / mark_pool_defaulted
 ```
 
 - `borrow`, `repay`, `lower_rate` and lifecycle transitions assert

@@ -9,15 +9,15 @@
 //! would test the mock.
 
 use seedless_contracts::interfaces::i_credit_pool::{
-    ICreditPoolDispatcher, ICreditPoolDispatcherTrait,
+    ICreditPoolDispatcher, ICreditPoolDispatcherTrait, PoolStatus,
 };
 use seedless_contracts::interfaces::i_pool_factory::{
     IPoolFactoryDispatcher, IPoolFactoryDispatcherTrait,
 };
 use seedless_contracts::mocks::mock_erc20::{IMockERC20Dispatcher, IMockERC20DispatcherTrait};
 use snforge_std_deprecated::{
-    ContractClassTrait, DeclareResultTrait, declare, start_cheat_caller_address,
-    stop_cheat_caller_address,
+    ContractClassTrait, DeclareResultTrait, declare, start_cheat_block_timestamp,
+    start_cheat_caller_address, stop_cheat_block_timestamp, stop_cheat_caller_address,
 };
 use starknet::{ClassHash, ContractAddress, contract_address_const};
 
@@ -397,4 +397,166 @@ fn test_revoking_between_pools_also_closes_the_new_one() {
 
     let pool_two = create_pool(factory, 25, 0);
     try_deposit(usdc, pool_two, LENDER1(), 100 * ONE_USDC);
+}
+
+
+// ---------------------------------------------------------------------------
+// Factory forwarders for the pool entrypoints gated on `caller == factory`
+// ---------------------------------------------------------------------------
+//
+// `unpause` and `mark_defaulted` assert the caller IS the factory contract.
+// Every test that exercised them did it by cheating the caller address to a
+// FACTORY() constant against a bare pool, which proves the assert works and
+// says nothing about whether any real caller can satisfy it. Nothing could:
+// the factory had no function that called into a pool, so both entrypoints
+// were unreachable on chain.
+//
+// For `unpause` that is a stuck pool, not a missing feature. A founder can
+// pause alone but only the factory can lift it, so a paused pool stayed paused
+// forever with deposit, borrow and repay frozen.
+//
+// These tests go through a real factory and a real pool with NO caller cheat
+// on the pool, so they fail if the forwarder is ever removed.
+
+/// A pool that has been paused can actually be unpaused again.
+#[test]
+fn test_owner_can_unpause_a_pool_through_the_factory() {
+    let usdc = deploy_usdc();
+    let factory = deploy_factory(usdc.contract_address);
+    let pool = create_pool(factory, 25, 0);
+
+    // Founder pauses unilaterally, which is allowed.
+    start_cheat_caller_address(pool.contract_address, FOUNDER());
+    pool.pause();
+    stop_cheat_caller_address(pool.contract_address);
+    assert(pool.get_pool_info().paused, 'should be paused');
+
+    // The owner lifts it through the factory. No cheat on the pool: the
+    // factory is genuinely the caller.
+    start_cheat_caller_address(factory.contract_address, OWNER());
+    factory.unpause_pool(pool.contract_address);
+    stop_cheat_caller_address(factory.contract_address);
+
+    assert(!pool.get_pool_info().paused, 'should be unpaused');
+    // And the pool works again, which is the property that actually matters.
+    start_cheat_caller_address(factory.contract_address, OWNER());
+    factory.set_lp_authorization(LENDER1(), true);
+    stop_cheat_caller_address(factory.contract_address);
+    try_deposit(usdc, pool, LENDER1(), 100 * ONE_USDC);
+}
+
+/// Roca can stop a pool it did not found.
+#[test]
+fn test_owner_can_pause_a_pool_through_the_factory() {
+    let usdc = deploy_usdc();
+    let factory = deploy_factory(usdc.contract_address);
+    let pool = create_pool(factory, 25, 0);
+
+    start_cheat_caller_address(factory.contract_address, OWNER());
+    factory.pause_pool(pool.contract_address);
+    stop_cheat_caller_address(factory.contract_address);
+
+    assert(pool.get_pool_info().paused, 'should be paused');
+}
+
+#[test]
+#[should_panic(expected: 'Caller is not the owner')]
+fn test_stranger_cannot_unpause_through_the_factory() {
+    let usdc = deploy_usdc();
+    let factory = deploy_factory(usdc.contract_address);
+    let pool = create_pool(factory, 25, 0);
+
+    start_cheat_caller_address(pool.contract_address, FOUNDER());
+    pool.pause();
+    stop_cheat_caller_address(pool.contract_address);
+
+    start_cheat_caller_address(factory.contract_address, STRANGER());
+    factory.unpause_pool(pool.contract_address);
+}
+
+/// The founder cannot lift their own pause by going through the factory
+/// either, which is the whole point of the asymmetry.
+#[test]
+#[should_panic(expected: 'Caller is not the owner')]
+fn test_founder_cannot_unpause_through_the_factory() {
+    let usdc = deploy_usdc();
+    let factory = deploy_factory(usdc.contract_address);
+    let pool = create_pool(factory, 25, 0);
+
+    start_cheat_caller_address(pool.contract_address, FOUNDER());
+    pool.pause();
+    stop_cheat_caller_address(pool.contract_address);
+
+    start_cheat_caller_address(factory.contract_address, FOUNDER());
+    factory.unpause_pool(pool.contract_address);
+}
+
+/// The forwarder only acts on pools this factory deployed.
+#[test]
+#[should_panic(expected: 'Not a pool from this factory')]
+fn test_forwarder_refuses_a_foreign_pool() {
+    let usdc = deploy_usdc();
+    let factory = deploy_factory(usdc.contract_address);
+
+    // A pool from a different factory.
+    let other = deploy_factory(usdc.contract_address);
+    let foreign = create_pool(other, 25, 0);
+
+    start_cheat_caller_address(factory.contract_address, OWNER());
+    factory.unpause_pool(foreign.contract_address);
+}
+
+/// A defaulted pool can be declared defaulted, which is what makes the
+/// recovery path reachable at all.
+#[test]
+fn test_owner_can_mark_a_pool_defaulted_through_the_factory() {
+    let usdc = deploy_usdc();
+    let factory = deploy_factory(usdc.contract_address);
+    let pool = create_pool(factory, 25, 0);
+
+    start_cheat_caller_address(factory.contract_address, OWNER());
+    factory.set_lp_authorization(LENDER1(), true);
+    stop_cheat_caller_address(factory.contract_address);
+    try_deposit(usdc, pool, LENDER1(), 10_000 * ONE_USDC);
+
+    let borrow_at = SECONDS_PER_DAY;
+    start_cheat_block_timestamp(pool.contract_address, borrow_at);
+    start_cheat_caller_address(pool.contract_address, FOUNDER());
+    pool.borrow();
+    stop_cheat_caller_address(pool.contract_address);
+
+    // Past the full term.
+    start_cheat_block_timestamp(pool.contract_address, borrow_at + (366 * SECONDS_PER_DAY));
+
+    start_cheat_caller_address(factory.contract_address, OWNER());
+    factory.mark_pool_defaulted(pool.contract_address);
+    stop_cheat_caller_address(factory.contract_address);
+
+    assert(pool.get_pool_info().status == PoolStatus::Defaulted, 'should be defaulted');
+    stop_cheat_block_timestamp(pool.contract_address);
+}
+
+#[test]
+#[should_panic(expected: 'Caller is not the owner')]
+fn test_stranger_cannot_mark_defaulted_through_the_factory() {
+    let usdc = deploy_usdc();
+    let factory = deploy_factory(usdc.contract_address);
+    let pool = create_pool(factory, 25, 0);
+
+    start_cheat_caller_address(factory.contract_address, STRANGER());
+    factory.mark_pool_defaulted(pool.contract_address);
+}
+
+/// The pool still decides WHEN a default is permissible; the forwarder only
+/// decides who may ask.
+#[test]
+#[should_panic(expected: 'Pool not borrowed')]
+fn test_forwarder_does_not_bypass_the_pool_own_rules() {
+    let usdc = deploy_usdc();
+    let factory = deploy_factory(usdc.contract_address);
+    let pool = create_pool(factory, 25, 0);
+
+    // Never borrowed, so there is nothing to default on.
+    start_cheat_caller_address(factory.contract_address, OWNER());
+    factory.mark_pool_defaulted(pool.contract_address);
 }

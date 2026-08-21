@@ -369,6 +369,24 @@ pub mod PoolFactory {
             self.emit(ComplianceOfficerChanged { previous, current: officer });
         }
 
+        fn unpause_pool(ref self: ContractState, pool: ContractAddress) {
+            self.ownable.assert_only_owner();
+            self._assert_own_pool(pool);
+            ICreditPoolDispatcher { contract_address: pool }.unpause();
+        }
+
+        fn pause_pool(ref self: ContractState, pool: ContractAddress) {
+            self.ownable.assert_only_owner();
+            self._assert_own_pool(pool);
+            ICreditPoolDispatcher { contract_address: pool }.pause();
+        }
+
+        fn mark_pool_defaulted(ref self: ContractState, pool: ContractAddress) {
+            self.ownable.assert_only_owner();
+            self._assert_own_pool(pool);
+            ICreditPoolDispatcher { contract_address: pool }.mark_defaulted();
+        }
+
         fn get_compliance_officer(self: @ContractState) -> ContractAddress {
             self.compliance_officer.read()
         }
@@ -381,6 +399,16 @@ pub mod PoolFactory {
     // Internal functions
     #[generate_trait]
     impl AllowlistInternalImpl of AllowlistInternalTrait {
+        /// Refuse to act on a pool this factory did not deploy.
+        ///
+        /// Without it the owner could point a forwarder at any contract with a
+        /// matching entrypoint. Those calls would revert on the target's own
+        /// `caller == factory` check, but failing here is cheaper and keeps the
+        /// factory's authority scoped to what it actually created.
+        fn _assert_own_pool(self: @ContractState, pool: ContractAddress) {
+            assert(self.is_valid_pool.read(pool), 'Not a pool from this factory');
+        }
+
         fn _assert_only_compliance(self: @ContractState) {
             let caller = get_caller_address();
             assert(caller == self.compliance_officer.read(), 'Not compliance officer');
