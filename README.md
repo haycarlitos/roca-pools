@@ -133,6 +133,39 @@ Identity verification, sanctions screening and the judgement about who may
 participate all happen off chain. The officer's key is the last step that makes
 an already-made decision effective on chain.
 
+### Who holds what, in practice
+
+The intended production split is two people: **one responsible for funds, one
+for the whitelist.** They map to the keys as follows, and the mapping is worth
+stating because only one of these keys can move money.
+
+| Key | Held by | Can move investor funds? |
+|---|---|---|
+| **Pool founder** | Funds owner (a 2-of-3 multisig) | **Yes** — `borrow()` transfers the entire pool balance to the founder |
+| **Factory owner** | Funds owner | No |
+| **Compliance officer** | Whitelist owner | No |
+
+The founder key is the one that must be a multisig. A single key that can call
+`borrow()` on a funded pool can take the whole placement in one transaction.
+The factory owner cannot: `platform_wallet` is frozen into each pool at
+`initialize` and `repay` pays from the pool's own copy, and `set_pool_class_hash`
+only affects pools deployed afterwards — so a compromised owner key can grief
+(pause, mislabel) but cannot reach deposits.
+
+Conversely the compliance key should **not** be a multisig. It exists to be
+reachable in minutes; a signing ceremony defeats it.
+
+**During a rehearsal one person holds every role.** That is deliberate and it
+is safe for exactly one reason: the only money at risk is the operator's own.
+The founder is fixed per pool at `create_pool` and can never be changed, so a
+pool founded by a personal wallet is founded by that wallet forever — which
+means the rehearsal pool must never be reused for real investor capital.
+
+Authorization during a rehearsal runs through
+[`scripts/authorize.sh`](scripts/authorize.sh), not the admin UI: the app
+proposes this call through the multisig, which is correct for production and
+unusable before a multisig exists.
+
 ## How a pool works
 
 ```
