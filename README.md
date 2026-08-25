@@ -166,6 +166,22 @@ Authorization during a rehearsal runs through
 proposes this call through the multisig, which is correct for production and
 unusable before a multisig exists.
 
+The handover to the multisig runs through
+[`scripts/transfer-ownership.sh`](scripts/transfer-ownership.sh), and it is a
+one-way door. The factory uses OpenZeppelin's **one-step** `OwnableComponent`:
+there is no `accept_ownership` and no pending-owner state, so
+`transfer_ownership(X)` makes X the owner immediately and forever. If X is a
+typo, the factory is permanently unadministrable — fees frozen, pool class
+frozen, no pool can ever be unpaused or marked defaulted, compliance can never
+be rotated. Deployed pools keep working and lenders can always withdraw, so
+funds are never at risk, but nothing can be changed again.
+
+That is why the script refuses an address with no contract deployed at it: a
+multisig is a contract and a mistyped felt almost never is.
+
+**Never call `renounce_ownership`.** It is in the ABI because it ships with the
+OZ mixin, it permanently removes the owner, and there is no recovery.
+
 ## How a pool works
 
 ```
