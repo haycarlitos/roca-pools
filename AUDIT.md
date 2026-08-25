@@ -88,7 +88,8 @@ them were never written down before, and one of those turned out to be false.
    on time, and `status` is the field most readers use to judge performance.
    The 2026-08-19 delta review found the transition initially reachable; it is
    now gated on `Borrowed` and covered by
-   `test_a_full_recovery_does_not_relabel_a_defaulted_pool`.
+   `test_a_full_recovery_does_not_relabel_a_defaulted_pool` and
+   `test_full_recovery_after_default_stays_defaulted`.
 10. `borrow` may happen at most once, and takes the entire balance.
 11. `lower_rate` can only decrease. The rate is frozen into `borrow_rate_bps`
     at `borrow` time so later changes cannot alter an existing obligation.
