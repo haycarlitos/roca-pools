@@ -78,11 +78,41 @@ Stated explicitly, because a review that only lists what it checked overstates i
 
 ## A note on the lineage
 
-While this review was being wired up, `main` sat red for four days. A stale test — `test_full_recovery_after_default_flips_status_to_completed` — was rebased onto the `fffb6d8` fix and pushed without re-running the suite, so it asserted the old `Defaulted → Completed` behaviour against code that had deliberately stopped doing that. The test was correct when written and became wrong under its own fix.
+`main` was red for five days while this review was being written, and the
+first draft of this section got the reason wrong. Both facts belong here.
 
-Fixed in PR #3 (renamed to `test_full_recovery_after_default_stays_defaulted`) and cited in invariant 9 via PR #4.
+What actually happened, in order:
 
-It is recorded here because this file's stated purpose is publishing the unflattering version, and "our own regression suite was red while we were auditing the thing it guards" is exactly that. It also rhymes with the defect this review exists to close: in both cases a green-or-ignored test was treated as evidence about code it was no longer describing.
+1. **2026-08-20 — `scarb fmt --check` fails** on `tests/audit_prorata.cairo`.
+   The CI job runs the formatter check *before* the test step and exits 1, so
+   **the test suite never ran at all** from this commit onward.
+2. **Separately, a stale test was wrong.**
+   `test_full_recovery_after_default_flips_status_to_completed` was rebased
+   onto the `fffb6d8` fix and pushed without re-running the suite, so it
+   asserted the old `Defaulted → Completed` behaviour against code that had
+   deliberately stopped doing it. It was correct when written and became wrong
+   under its own fix.
+3. **The first defect hid the second.** Because formatting failed first, CI
+   never got far enough to report the failing test. Five consecutive runs on
+   `main` show `failure`, all of them attributable to formatting, with the
+   real test failure invisible underneath.
+4. PR #3 renamed the test to `..._stays_defaulted` and PR #4 cited it in
+   invariant 9 — but neither turned `main` green, because neither touched the
+   formatting. `main` was still red when this report was first drafted, and
+   the draft described the outage in the past tense as a four-day stale-test
+   problem. Both details were wrong: it was five days, ongoing, and the
+   blocking cause was formatting.
+
+The formatting is fixed in the same pull request as this report, which is what
+finally returns `main` to green.
+
+This is recorded because it rhymes with the defect the review exists to close,
+and the rhyme is the point. In every instance the same mistake recurs: **a
+signal was treated as evidence about something it was not describing.** A
+caller-cheating test read as proof of reachability. A rebased test read as
+proof of current behaviour. A red CI badge read as one known problem while it
+was actually masking a second. The contracts survived all three; the process
+caught none of them without someone going and looking.
 
 ## Bottom line
 
