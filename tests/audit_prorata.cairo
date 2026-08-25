@@ -254,8 +254,12 @@ fn test_pre_borrow_exit_shrinks_the_prorata_denominator() {
     // inflated, L1 would receive ~733 instead of 1100.
     let p1 = pool.get_position(L1());
     let p3 = pool.get_position(L3());
-    assert(p1.withdrawn + 5 >= 1_100 * ONE_USDC && p1.withdrawn <= 1_100 * ONE_USDC, 'L1 undiluted');
-    assert(p3.withdrawn + 5 >= 3_300 * ONE_USDC && p3.withdrawn <= 3_300 * ONE_USDC, 'L3 undiluted');
+    assert(
+        p1.withdrawn + 5 >= 1_100 * ONE_USDC && p1.withdrawn <= 1_100 * ONE_USDC, 'L1 undiluted',
+    );
+    assert(
+        p3.withdrawn + 5 >= 3_300 * ONE_USDC && p3.withdrawn <= 3_300 * ONE_USDC, 'L3 undiluted',
+    );
     assert(usdc.balance_of(pool.contract_address) < 10, 'no dilution residue');
 }
 
