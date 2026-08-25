@@ -193,10 +193,11 @@ fn test_interleaved_withdraw_across_default_stays_solvent() {
 }
 
 #[test]
-fn test_full_recovery_after_default_flips_status_to_completed() {
-    // The code comment says "the status stays Defaulted", but repay's
-    // completion branch still runs: a recovery that reaches total_owed sets
-    // Completed. Documents the real behavior; payout is unaffected either way.
+fn test_full_recovery_after_default_stays_defaulted() {
+    // A full recovery does NOT relabel a defaulted pool: repay's completion
+    // branch is gated on `status == Borrowed` (fffb6d8), so reaching total_owed
+    // leaves the pool Defaulted. Paying late does not make the payment on time,
+    // and payout is identical either way (same pro-rata branch).
     let usdc = deploy_usdc();
     let pool = deploy_pool();
     init_pool(pool, usdc.contract_address);
@@ -220,6 +221,6 @@ fn test_full_recovery_after_default_flips_status_to_completed() {
     stop_cheat_block_timestamp(pool.contract_address);
 
     let status = pool.get_pool_info().status;
-    // This is the point: it is NOT Defaulted anymore.
-    assert(status == PoolStatus::Completed, 'flipped to Completed');
+    // The point: a full recovery must NOT relabel it Completed.
+    assert(status == PoolStatus::Defaulted, 'stays defaulted');
 }
