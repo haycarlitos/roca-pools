@@ -72,6 +72,15 @@ them were never written down before, and one of those turned out to be false.
    factory did not deploy.
 7. Either founder or factory may `pause` — the factory via `pause_pool`, so
    Roca can stop a pool it did not found.
+
+   **Pausing the FACTORY does not pause its pools.** `PoolFactory::pause`
+   gates `create_pool`, so no new pools can be deployed, but `is_authorized`
+   is a plain view with no pause gate and `deposit` reads it as one — so
+   existing pools keep taking deposits with the factory fully paused. That is
+   deliberate: a factory brake should stop new issuance without stranding a
+   placement that is mid-funding. It is written down because it is the
+   opposite of what "pause the factory" sounds like. **To stop deposits into a
+   specific pool, use `pause_pool`.**
 8. `expire` is permissionless by design, callable by anyone once the funding
    deadline has passed. It only moves a stalled pool to a state where lenders
    can exit.

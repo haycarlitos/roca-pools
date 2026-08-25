@@ -12,6 +12,7 @@ only appears once it is closed is a marketing artifact.
 | 2026-08-18 | Roca, AI-assisted | Cross-codebase finding replication | [`../docs/audit-mapping.md`](../docs/audit-mapping.md) | Both defects fixed same day | 2 found in new code |
 | 2026-08-18 | Independent, AI-assisted (Claude Fable 5) | Full on-chain review | [`2026-08-18-independent-claude-fable5-full-review.md`](2026-08-18-independent-claude-fable5-full-review.md) | Ready to declare; 1 Low acted on (see next row) | 0 Critical/High, 2 Low, 5 Info |
 | 2026-08-19 | Independent, AI-assisted (Claude Fable 5) | Delta re-review (repay after default) | [`2026-08-19-independent-claude-fable5-defaulted-repay-delta.md`](2026-08-19-independent-claude-fable5-defaulted-repay-delta.md) | Verdict holds; invariant 9 wording to be corrected | 0 Critical/High, 1 Low, 2 Info |
+| 2026-08-24 | Independent, AI-assisted (Claude Fable 5) | Delta re-review (factory forwarders) + full reachability sweep | [`2026-08-24-independent-claude-fable5-forwarder-reachability-rereview.md`](2026-08-24-independent-claude-fable5-forwarder-reachability-rereview.md) | Ship; owner-identity check outstanding until deployment | 0 Critical/High, 2 Low, 1 Info |
 
 **No independent external audit by a human firm has been performed.** The reviews
 above are AI-assisted, adversarial, and published in full regardless of outcome,
