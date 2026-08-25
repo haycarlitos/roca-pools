@@ -67,8 +67,7 @@ fn deploy_factory(usdc: ContractAddress) -> IPoolFactoryDispatcher {
 // Create + activate a pool through the factory exactly as production does.
 fn create_pool(factory: IPoolFactoryDispatcher) -> ICreditPoolDispatcher {
     start_cheat_caller_address(factory.contract_address, FOUNDER());
-    let addr = factory
-        .create_pool(10_000 * ONE_USDC, 1000, 365, 30, 30 * DAY, 'HASH', 100, 0);
+    let addr = factory.create_pool(10_000 * ONE_USDC, 1000, 365, 30, 30 * DAY, 'HASH', 100, 0);
     stop_cheat_caller_address(factory.contract_address);
     let pool = ICreditPoolDispatcher { contract_address: addr };
     start_cheat_caller_address(addr, FOUNDER());
