@@ -65,8 +65,13 @@ them were never written down before, and one of those turned out to be false.
 **Access**
 
 5. Only `founder` may call `borrow`, `repay`, `lower_rate`, `activate`, `cancel`.
-6. Only the factory may `unpause` and `mark_defaulted`.
-7. Either founder or factory may `pause`.
+6. Only the factory may `unpause` and `mark_defaulted`. Because that means the
+   factory *contract*, both are reached through owner-gated forwarders on the
+   factory (`unpause_pool`, `mark_pool_defaulted`); a direct call from the
+   owner is not the factory and reverts. The forwarders refuse any address the
+   factory did not deploy.
+7. Either founder or factory may `pause` — the factory via `pause_pool`, so
+   Roca can stop a pool it did not found.
 8. `expire` is permissionless by design, callable by anyone once the funding
    deadline has passed. It only moves a stalled pool to a state where lenders
    can exit.

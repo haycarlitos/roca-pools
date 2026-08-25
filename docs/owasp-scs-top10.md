@@ -19,6 +19,7 @@ applicable" is a claim a reviewer should be able to check in one read.
 |---|---|---|
 | `borrow`, `repay`, `lower_rate`, `activate`, `cancel` | pool founder | `test_omar_c1_*` |
 | `unpause`, `mark_defaulted` | factory | `test_factory_can_unpause` |
+| `unpause_pool`, `pause_pool`, `mark_pool_defaulted` | factory owner | `test_owner_can_unpause_a_pool_through_the_factory`, `test_owner_can_mark_a_pool_defaulted_through_the_factory`, `test_forwarder_refuses_a_foreign_pool` |
 | `pause` | founder or factory | `test_founder_can_pause`, `test_factory_can_pause` |
 | `set_fees`, `set_pool_class_hash`, `set_platform_wallet` | factory owner | `test_stranger_cannot_*` |
 | `set_lp_authorization`, batch | compliance officer | `test_stranger_cannot_authorize` |
