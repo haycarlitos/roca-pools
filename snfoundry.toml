@@ -7,8 +7,13 @@
 # The account must already exist in sncast's accounts file and be funded on
 # the target network:
 #
-#   sncast account import --name roca-deployer --address 0x... \
-#     --private-key 0x... --type oz
+#   sncast account import --name roca-deployer --network mainnet \
+#     --address 0x... --private-key 0x... --type oz
+#
+# `--network` (or `--url`) is REQUIRED even though importing sounds local —
+# sncast checks the account against the chain. Omitting it fails with
+# "Either `--network` or `--url` must be provided". Prefer --network: the
+# --url form would put an API-keyed RPC into your shell history.
 #
 # Toolchain versions are pinned in .tool-versions; Scarb.lock pins the
 # dependency commits. Both matter — a different Cairo release produces a

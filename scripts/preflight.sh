@@ -110,7 +110,7 @@ else
   if [[ -z "$ADDR" ]]; then
     fail "no sncast account named '$ACCOUNT'"
     echo "       any funded wallet works. The declarer gets NO privileges:"
-    echo "       sncast account import --name $ACCOUNT --address 0x... --private-key 0x... --type oz"
+    echo "       sncast account import --name $ACCOUNT --network mainnet --address 0x... --private-key 0x... --type oz"
   else
     pass "account resolves to $ADDR"
     for pair in "STRK $STRK" "ETH $ETH"; do
