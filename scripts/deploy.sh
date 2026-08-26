@@ -132,7 +132,21 @@ declare_contract() {
     # Re-declaring an existing class is success, not failure: class hashes are
     # deterministic, so a repeat run should reuse the hash rather than stop.
     if grep -qi 'already declared' <<<"$out"; then
-      echo "    already declared, reusing class hash" >&2
+      # sncast's "already declared" error does NOT include the class hash, so
+      # there is nothing to parse out of it — a re-run used to die here with
+      # "could not parse class hash" even though the class was sitting on
+      # chain, correctly declared, from the previous attempt.
+      #
+      # Compute it locally instead. Class hashes are deterministic from the
+      # compiled Sierra, which is the same property that makes re-declaring
+      # free in the first place.
+      echo "    already declared, computing class hash locally" >&2
+      local computed
+      computed="$(sncast utils class-hash --contract-name "$name" 2>&1 \
+                  | sed -n 's/.*Class Hash: *\(0x[0-9a-fA-F]*\).*/\1/p' | head -1)"
+      [[ -n "$computed" ]] || die "class already declared but could not compute its hash locally"
+      echo "$computed"
+      return 0
     elif grep -qi 'invalid transaction nonce' <<<"$out"; then
       die "declare $name failed on a stale nonce. The previous transaction had
        not been included yet. Re-run: already-declared classes are free, so
@@ -142,7 +156,9 @@ declare_contract() {
     fi
   fi
 
-  grep -oE '0x[0-9a-fA-F]{40,64}' <<<"$out" | head -1
+  # Match the labelled line, not merely the first hex string — the success
+  # output also carries a transaction hash and two explorer URLs.
+  sed -n 's/.*Class Hash: *\(0x[0-9a-fA-F]*\).*/\1/p' <<<"$out" | head -1
 }
 
 CREDIT_POOL_CLASS="$(declare_contract CreditPool)"
