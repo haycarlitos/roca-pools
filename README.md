@@ -13,8 +13,23 @@ formal employees in Mexico.
 
 | Contract | Address |
 |---|---|
-| PoolFactory | [`0x070bd23697b102a152f6d9c322a795cd42466c43d106a420a2d8d3e046cc2673`](https://starkscan.co/contract/0x070bd23697b102a152f6d9c322a795cd42466c43d106a420a2d8d3e046cc2673) |
+| **PoolFactory (V2, current)** | [`0x02a8ceba3ddea00f9b8137d7977a58b9e0a7ce28e065d02efb9694c4f850e9ac`](https://starkscan.co/contract/0x02a8ceba3ddea00f9b8137d7977a58b9e0a7ce28e065d02efb9694c4f850e9ac) |
+| CreditPool (class, V2) | [`0x07ec75b2685a7c5e712a3d9067d94305aa6d00d3ece70dfb4f00b7aef526f4af`](https://starkscan.co/class/0x07ec75b2685a7c5e712a3d9067d94305aa6d00d3ece70dfb4f00b7aef526f4af) |
+| PoolFactory (class, V2) | [`0x039086a75895b79304cb1a6fc4eeef4abc289b295b056463ba2383af3ee388bc`](https://starkscan.co/class/0x039086a75895b79304cb1a6fc4eeef4abc289b295b056463ba2383af3ee388bc) |
 | USDC (Starknet) | [`0x033068f6539f8e6e6b131e6b2b814e6c34a5224bc66947c47dab9dfee93b35fb`](https://starkscan.co/contract/0x033068f6539f8e6e6b131e6b2b814e6c34a5224bc66947c47dab9dfee93b35fb) |
+| PoolFactory (V1, superseded) | [`0x070bd23697b102a152f6d9c322a795cd42466c43d106a420a2d8d3e046cc2673`](https://starkscan.co/contract/0x070bd23697b102a152f6d9c322a795cd42466c43d106a420a2d8d3e046cc2673) |
+
+V2 was deployed 2026-08-26. **Use the V2 factory**; V1 remains on chain and
+its pools still function, but it predates the investor allowlist and the
+owner-gated pool forwarders, and its `create_pool` takes six arguments where
+V2 takes eight.
+
+V2 ownership has **not yet been transferred to the treasury multisig** — it
+is still held by the deploying key while the first pool is rehearsed. Until
+that handover, treat the deployment as pre-production regardless of what the
+contracts themselves guarantee. See
+[`audits/2026-08-24-…-forwarder-reachability-rereview.md`](audits/2026-08-24-independent-claude-fable5-forwarder-reachability-rereview.md),
+"What could not be verified".
 
 LP app (production): https://rocabeneficios.vercel.app, where investors
 onboard with a **passkey** (no seed phrase, no gas) via
@@ -258,13 +273,16 @@ Read back from `get_config()` on mainnet, for comparison after any redeploy:
 
 | | |
 |---|---|
-| owner | `0x06152df0e70bedbf7c8256f9e26eda77ba8785db3d8b7dc545a62886f618d5c0` |
+| owner | deploying key, pending transfer to the multisig |
 | platform_wallet | same as owner |
 | usdc_address | `0x033068f6539f8e6e6b131e6b2b814e6c34a5224bc66947c47dab9dfee93b35fb` |
-| credit_pool_class_hash | `0x07d50032f6d6d9e15b8a550d686c6737e2ecca2a51c9ee397235f946382502cc` |
-| creation_fee_cap | 199 USDC |
-| creation_fee_bps | 100 (1%) |
-| repayment_fee_bps | 50 (0.5%) |
+| credit_pool_class_hash | `0x07ec75b2685a7c5e712a3d9067d94305aa6d00d3ece70dfb4f00b7aef526f4af` |
+| creation_fee_cap | 199 USDC (ceiling, only applies if bps is ever raised) |
+| creation_fee_bps | **0** |
+| repayment_fee_bps | **0** |
+
+V2 ships with both fee rates at zero, so creating a pool and repaying one
+cost nothing beyond gas. V1 defaulted to 1% creation and 0.5% repayment.
 
 Fees are storage, not constants: `set_fees()` changes them on a live factory
 with no redeploy. The values above are the constructor defaults, still

@@ -2,10 +2,14 @@
 #
 # Deploy PoolFactory (and the CreditPool class it clones) to Starknet.
 #
-# The mainnet factory at 0x070bd23697b102a152f6d9c322a795cd42466c43d106a420a2d8d3e046cc2673
+# The original mainnet factory at
+# 0x070bd23697b102a152f6d9c322a795cd42466c43d106a420a2d8d3e046cc2673
 # was deployed by hand and the steps existed only in someone's shell history,
 # which meant the deployment could not be reproduced or reviewed. This is that
-# process, written down.
+# process, written down — and it is how the V2 factory at
+# 0x02a8ceba3ddea00f9b8137d7977a58b9e0a7ce28e065d02efb9694c4f850e9ac
+# was deployed on 2026-08-26, which is the first deployment of this project
+# that anyone else can reproduce.
 #
 # Order matters: PoolFactory's constructor takes the CreditPool CLASS HASH,
 # because create_pool deploys pools from that class. So CreditPool must be
