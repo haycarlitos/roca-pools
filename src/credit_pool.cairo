@@ -934,8 +934,23 @@ pub mod CreditPool {
             };
 
             // Calculate principal vs interest
-            // Principal is capped at original deposit
-            let max_principal = position.deposited - position.withdrawn;
+            // Principal is capped at original deposit.
+            //
+            // Saturating, NOT a bare subtraction. `withdrawn` exceeds
+            // `deposited` the moment a lender collects any interest, and an
+            // unguarded `deposited - withdrawn` underflows from that point on.
+            // Because `withdraw` calls this function before doing anything
+            // else, the panic reached further than the view: the lender could
+            // no longer withdraw at all, so any entitlement arriving after
+            // they crossed that line was permanently unreachable.
+            //
+            // Once withdrawn >= deposited the principal is fully returned by
+            // definition, so everything still owed is interest.
+            let max_principal = if position.withdrawn >= position.deposited {
+                0
+            } else {
+                position.deposited - position.withdrawn
+            };
             let principal_part = if available > max_principal {
                 max_principal
             } else {

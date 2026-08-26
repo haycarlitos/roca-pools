@@ -120,6 +120,34 @@ them were never written down before, and one of those turned out to be false.
 
 ## Known Issues
 
+### Withdrawal underflow after a lender collects interest — FIXED
+
+`_calculate_withdrawal` computed `position.deposited - position.withdrawn`
+with no guard, on the post-borrow path. `withdrawn` exceeds `deposited` the
+moment a lender collects any interest, so from that point the subtraction
+underflowed and the whole function panicked with `u256_sub Overflow`.
+
+It reached further than a broken view. `withdraw()` calls
+`_calculate_withdrawal` as its first step, so the lender could no longer
+withdraw at all — any entitlement arriving after they crossed that line was
+permanently unreachable. Two lenders, a partial repayment, an exit that
+collects interest, then the remainder arriving is enough to strand funds.
+
+Found on mainnet during the first rehearsal, as a reverting
+`get_available_withdrawal` on a pool that had just been repaid in full. Not
+found by either prior audit or by this project's own reachability review:
+every withdrawal test took the whole entitlement in one call, which is the
+one path that never leaves `withdrawn > deposited` with anything still owed.
+
+Now saturating — once `withdrawn >= deposited` the principal is fully
+returned by definition, so everything still owed is interest. Covered by
+`test_lender_can_still_withdraw_after_collecting_interest`.
+
+**The deployed class `0x07ec75b2685a…` still contains this bug.** Pools are
+immutable, so pool #8 and any pool created from that class keep it. A new
+class must be declared and installed with `set_pool_class_hash` before any
+pool holds third-party money.
+
 Found by us, disclosed here so review time is not spent rediscovering them.
 
 ### 1. `total_deposited` was not decremented on withdrawal (High, FIXED)
