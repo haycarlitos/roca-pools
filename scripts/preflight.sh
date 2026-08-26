@@ -38,6 +38,7 @@ done
 ok=0; bad=0
 pass() { printf '  \033[32mok\033[0m   %s\n' "$1"; ok=$((ok+1)); }
 fail() { printf '  \033[31mFAIL\033[0m %s\n' "$1"; bad=$((bad+1)); }
+note() { printf '  \033[36mnote\033[0m %s\n' "$1"; }
 warn() { printf '  \033[33mwarn\033[0m %s\n' "$1"; }
 
 rpc_call() { # $1=contract $2=selector $3..=calldata
@@ -113,14 +114,28 @@ else
     echo "       sncast account import --name $ACCOUNT --network mainnet --address 0x... --private-key 0x... --type oz"
   else
     pass "account resolves to $ADDR"
-    for pair in "STRK $STRK" "ETH $ETH"; do
+    # STRK is the fee token. Starknet v3 transactions pay in STRK and sncast
+    # 0.53 sends v3, so STRK is what a declare actually spends.
+    #
+    # ETH is the LEGACY fee token and is reported for information only. This
+    # used to hard-fail on both, which blocked a deploy from a wallet holding
+    # 30 STRK and no ETH — a wallet that could have declared and deployed
+    # without trouble. A preflight that refuses a working configuration is
+    # worse than no preflight, because the fix it demands is to move funds
+    # that were never going to be spent.
+    for pair in "STRK $STRK required" "ETH $ETH legacy"; do
       set -- $pair
       raw=$(rpc_call "$2" "0x2e4263afad30923c891518314c3c95dbe830a16874e8abc5777a9a20b54c76e" "$ADDR" \
             | sed -n 's/.*"result":\["\([^"]*\)".*/\1/p')
       if [[ -n "$raw" ]]; then
         human=$(python3 -c "print(int('$raw',16)/1e18)")
-        if python3 -c "exit(0 if int('$raw',16) > 2*10**17 else 1)"; then pass "$1 balance $human"
-        else fail "$1 balance $human is thin, fund before declaring"; fi
+        if [[ "$3" == "legacy" ]]; then
+          note "$1 balance $human (legacy fee token, not required for v3)"
+        elif python3 -c "exit(0 if int('$raw',16) > 2*10**17 else 1)"; then
+          pass "$1 balance $human"
+        else
+          fail "$1 balance $human is thin, fund before declaring"
+        fi
       else warn "$1 balance unreadable"; fi
     done
   fi
