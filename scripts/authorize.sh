@@ -88,7 +88,7 @@ is_felt "$FACTORY" || die "not a felt address: $FACTORY"
 if [[ -n "$CHECK" ]]; then
   is_felt "$CHECK" || die "not a felt address: $CHECK"
   echo "==> is_authorized($CHECK)"
-  out="$(sncast --url "$STARKNET_RPC_URL" call \
+  out="$(sncast call --url "$STARKNET_RPC_URL" \
           --contract-address "$FACTORY" \
           --function is_authorized \
           --calldata "$CHECK" 2>&1)" || { echo "$out" >&2; die "call failed"; }
@@ -153,7 +153,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
 fi
 
 echo "==> set_lp_authorization($LP, $FLAG)"
-out="$(sncast --url "$STARKNET_RPC_URL" --account "$ACCOUNT" invoke \
+out="$(sncast --account "$ACCOUNT" invoke --url "$STARKNET_RPC_URL" \
         --contract-address "$FACTORY" \
         --function set_lp_authorization \
         --calldata "$LP" "$FLAG" 2>&1)" || {

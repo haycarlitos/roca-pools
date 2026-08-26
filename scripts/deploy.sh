@@ -52,6 +52,13 @@ done
 
 die() { echo "error: $*" >&2; exit 1; }
 
+# sncast 0.53 flag placement, which is not symmetric and is easy to get wrong:
+#   --account is a GLOBAL option and goes BEFORE the subcommand
+#   --url     is a SUBCOMMAND option and goes AFTER it
+# i.e.  sncast --account NAME declare --url URL --contract-name X
+# Putting --url first fails with "unexpected argument '--url' found", and the
+# tip it prints ("'declare --url' exists") is the whole explanation.
+
 # ---- preflight -------------------------------------------------------------
 
 command -v scarb >/dev/null || die "scarb not found. Install the pins in .tool-versions (asdf install / mise install)."
@@ -66,7 +73,7 @@ for addr in "$OWNER" "$PLATFORM_WALLET" "$USDC"; do
   [[ "$addr" =~ ^0x[0-9a-fA-F]{1,64}$ ]] || die "not a felt address: $addr"
 done
 
-CHAIN_ID="$(sncast --url "$STARKNET_RPC_URL" show-config 2>/dev/null | grep -i chain || true)"
+CHAIN_ID="$(sncast show-config --url "$STARKNET_RPC_URL" 2>/dev/null | grep -i chain || true)"
 
 cat <<EOF
 
@@ -97,8 +104,8 @@ scarb build
 declare_contract() {
   local name="$1" out
   echo "==> declare $name" >&2
-  if ! out="$(sncast --url "$STARKNET_RPC_URL" --account "$ACCOUNT" \
-                declare --contract-name "$name" 2>&1)"; then
+  if ! out="$(sncast --account "$ACCOUNT" \
+                declare --url "$STARKNET_RPC_URL" --contract-name "$name" 2>&1)"; then
     if grep -qi 'already declared' <<<"$out"; then
       echo "    already declared, reusing class hash" >&2
     else
@@ -130,8 +137,8 @@ echo "    PoolFactory class: $FACTORY_CLASS"
 # Getting it wrong deploys a factory that pays fees to the USDC contract.
 
 echo "==> deploy PoolFactory"
-DEPLOY_OUT="$(sncast --url "$STARKNET_RPC_URL" --account "$ACCOUNT" \
-  deploy --class-hash "$FACTORY_CLASS" \
+DEPLOY_OUT="$(sncast --account "$ACCOUNT" \
+  deploy --url "$STARKNET_RPC_URL" --class-hash "$FACTORY_CLASS" \
   --constructor-calldata "$OWNER" "$PLATFORM_WALLET" "$USDC" "$CREDIT_POOL_CLASS" 2>&1)" \
   || { echo "$DEPLOY_OUT" >&2; die "deploy failed"; }
 
@@ -142,7 +149,7 @@ FACTORY_ADDRESS="$(grep -oE 'contract_address: *0x[0-9a-fA-F]+' <<<"$DEPLOY_OUT"
 # Read the config back rather than trusting the deploy succeeded as intended.
 
 echo "==> verify get_config()"
-sncast --url "$STARKNET_RPC_URL" call \
+sncast call --url "$STARKNET_RPC_URL" \
   --contract-address "$FACTORY_ADDRESS" --function get_config || \
   echo "    (verification call failed — check manually before using this factory)"
 

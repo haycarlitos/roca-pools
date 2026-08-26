@@ -52,7 +52,7 @@ rpc_call() { # $1=contract $2=selector $3..=calldata
 if [[ -n "$VERIFY" ]]; then
   echo "verifying factory $VERIFY"
   echo "  read it with sncast:"
-  echo "    sncast --url \$STARKNET_RPC_URL call \\"
+  echo "    sncast call --url \$STARKNET_RPC_URL \\"
   echo "      --contract-address $VERIFY --function get_config"
   echo
   echo "  assert, in order:"

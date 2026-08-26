@@ -96,7 +96,7 @@ felt_eq() {
 
 read_owner() {
   local out
-  out="$(sncast --url "$STARKNET_RPC_URL" call \
+  out="$(sncast call --url "$STARKNET_RPC_URL" \
           --contract-address "$FACTORY" \
           --function owner 2>&1)" || { echo "$out" >&2; die "could not read owner"; }
   grep -oE '0x[0-9a-fA-F]{1,64}' <<<"$out" | tail -1
@@ -130,7 +130,7 @@ fi
 # than any amount of squinting at hex.
 
 echo "==> checking there is a contract at $NEW_OWNER"
-CLASS_OUT="$(sncast --url "$STARKNET_RPC_URL" call \
+CLASS_OUT="$(sncast call --url "$STARKNET_RPC_URL" \
               --contract-address "$NEW_OWNER" \
               --function get_version 2>&1 || true)"
 
@@ -186,7 +186,7 @@ read -r TYPED
 felt_eq "$TYPED" "$NEW_OWNER" || die "addresses do not match — nothing sent."
 
 echo "==> transfer_ownership($NEW_OWNER)"
-out="$(sncast --url "$STARKNET_RPC_URL" --account "$ACCOUNT" invoke \
+out="$(sncast --account "$ACCOUNT" invoke --url "$STARKNET_RPC_URL" \
         --contract-address "$FACTORY" \
         --function transfer_ownership \
         --calldata "$NEW_OWNER" 2>&1)" || {
