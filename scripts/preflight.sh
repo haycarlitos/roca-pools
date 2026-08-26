@@ -153,10 +153,22 @@ else
         human=$(python3 -c "print(int('$raw',16)/1e18)")
         if [[ "$3" == "legacy" ]]; then
           note "$1 balance $human (legacy fee token, not required for v3)"
-        elif python3 -c "exit(0 if int('$raw',16) > 2*10**17 else 1)"; then
+        # 150 STRK, not 0.2. Measured on mainnet 2026-08-26: a single
+        # CreditPool declare was bounded at 118.9 STRK (l2_gas 2,370,438,240
+        # at a 50,151,514,419 FRI/gas ceiling) and would have charged ~83 at
+        # the live price. Two declares plus a deploy is the real requirement.
+        #
+        # The old 0.2 threshold passed a wallet holding 30.5 STRK, which then
+        # failed at the first declare with "Resources bounds exceed balance"
+        # after two full recompiles. A floor that cannot fund one transaction
+        # is not a floor.
+        elif python3 -c "exit(0 if int('$raw',16) >= 150*10**18 else 1)"; then
           pass "$1 balance $human"
         else
-          fail "$1 balance $human is thin, fund before declaring"
+          fail "$1 balance $human — a declare alone bounds at ~119 STRK"
+          echo "       budget ~150 STRK for two declares plus the deploy."
+          echo "       unused gas is refunded; the account must simply be able"
+          echo "       to cover the bound at submission time."
         fi
       else warn "$1 balance unreadable"; fi
     done
