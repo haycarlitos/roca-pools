@@ -114,9 +114,14 @@ declare_contract() {
   #
   # tee goes to stderr so the function's stdout stays clean — the caller
   # captures it to read the class hash out.
+  # --wait is not optional here. Without it sncast returns as soon as the
+  # transaction is accepted by the gateway, not when it is included, so the
+  # NEXT declare reads a stale nonce and dies with "Invalid transaction
+  # nonce" — which is what happened on the first successful run: CreditPool
+  # declared fine, PoolFactory failed immediately after.
   tmp="$(mktemp)"
   set +e
-  sncast --account "$ACCOUNT" \
+  sncast --account "$ACCOUNT" --wait \
     declare --url "$STARKNET_RPC_URL" --contract-name "$name" 2>&1 | tee "$tmp" >&2
   # Read PIPESTATUS immediately: any command in between overwrites it.
   rc=${PIPESTATUS[0]}
@@ -128,6 +133,10 @@ declare_contract() {
     # deterministic, so a repeat run should reuse the hash rather than stop.
     if grep -qi 'already declared' <<<"$out"; then
       echo "    already declared, reusing class hash" >&2
+    elif grep -qi 'invalid transaction nonce' <<<"$out"; then
+      die "declare $name failed on a stale nonce. The previous transaction had
+       not been included yet. Re-run: already-declared classes are free, so
+       this costs nothing to retry."
     else
       die "declare $name failed (see output above)"
     fi
@@ -160,7 +169,7 @@ echo "==> deploy PoolFactory"
 # Streamed for the same reason as the declares: this waits on acceptance too.
 DEPLOY_TMP="$(mktemp)"
 set +e
-sncast --account "$ACCOUNT" \
+sncast --account "$ACCOUNT" --wait \
   deploy --url "$STARKNET_RPC_URL" --class-hash "$FACTORY_CLASS" \
   --constructor-calldata "$OWNER" "$PLATFORM_WALLET" "$USDC" "$CREDIT_POOL_CLASS" 2>&1 \
   | tee "$DEPLOY_TMP"
