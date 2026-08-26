@@ -102,17 +102,37 @@ scarb build
 # fail. Parse the hash out of either outcome.
 
 declare_contract() {
-  local name="$1" out
+  local name="$1" out tmp rc
   echo "==> declare $name" >&2
-  if ! out="$(sncast --account "$ACCOUNT" \
-                declare --url "$STARKNET_RPC_URL" --contract-name "$name" 2>&1)"; then
+  echo "    (sncast recompiles in release profile first, then estimates and" >&2
+  echo "     submits — expect a minute or two before the class hash appears)" >&2
+
+  # Stream sncast's output AND capture it. It used to be captured only, so a
+  # declare was indistinguishable from a hang for well over a minute:
+  # recompile, then fee estimation, then waiting for acceptance, all silent.
+  # During the first real deploy that silence was twice read as a failure.
+  #
+  # tee goes to stderr so the function's stdout stays clean — the caller
+  # captures it to read the class hash out.
+  tmp="$(mktemp)"
+  set +e
+  sncast --account "$ACCOUNT" \
+    declare --url "$STARKNET_RPC_URL" --contract-name "$name" 2>&1 | tee "$tmp" >&2
+  # Read PIPESTATUS immediately: any command in between overwrites it.
+  rc=${PIPESTATUS[0]}
+  set -e
+  out="$(cat "$tmp")"; rm -f "$tmp"
+
+  if [[ "$rc" != "0" ]]; then
+    # Re-declaring an existing class is success, not failure: class hashes are
+    # deterministic, so a repeat run should reuse the hash rather than stop.
     if grep -qi 'already declared' <<<"$out"; then
       echo "    already declared, reusing class hash" >&2
     else
-      echo "$out" >&2
-      die "declare $name failed"
+      die "declare $name failed (see output above)"
     fi
   fi
+
   grep -oE '0x[0-9a-fA-F]{40,64}' <<<"$out" | head -1
 }
 
@@ -137,10 +157,17 @@ echo "    PoolFactory class: $FACTORY_CLASS"
 # Getting it wrong deploys a factory that pays fees to the USDC contract.
 
 echo "==> deploy PoolFactory"
-DEPLOY_OUT="$(sncast --account "$ACCOUNT" \
+# Streamed for the same reason as the declares: this waits on acceptance too.
+DEPLOY_TMP="$(mktemp)"
+set +e
+sncast --account "$ACCOUNT" \
   deploy --url "$STARKNET_RPC_URL" --class-hash "$FACTORY_CLASS" \
-  --constructor-calldata "$OWNER" "$PLATFORM_WALLET" "$USDC" "$CREDIT_POOL_CLASS" 2>&1)" \
-  || { echo "$DEPLOY_OUT" >&2; die "deploy failed"; }
+  --constructor-calldata "$OWNER" "$PLATFORM_WALLET" "$USDC" "$CREDIT_POOL_CLASS" 2>&1 \
+  | tee "$DEPLOY_TMP"
+DEPLOY_RC=${PIPESTATUS[0]}
+set -e
+DEPLOY_OUT="$(cat "$DEPLOY_TMP")"; rm -f "$DEPLOY_TMP"
+[[ "$DEPLOY_RC" == "0" ]] || die "deploy failed (see output above)"
 
 FACTORY_ADDRESS="$(grep -oE 'contract_address: *0x[0-9a-fA-F]+' <<<"$DEPLOY_OUT" | grep -oE '0x[0-9a-fA-F]+' | head -1)"
 [[ -n "$FACTORY_ADDRESS" ]] || { echo "$DEPLOY_OUT" >&2; die "could not parse deployed address"; }
