@@ -13,8 +13,23 @@ formal employees in Mexico.
 
 | Contract | Address |
 |---|---|
-| PoolFactory | [`0x070bd23697b102a152f6d9c322a795cd42466c43d106a420a2d8d3e046cc2673`](https://starkscan.co/contract/0x070bd23697b102a152f6d9c322a795cd42466c43d106a420a2d8d3e046cc2673) |
+| **PoolFactory (V2, current)** | [`0x02a8ceba3ddea00f9b8137d7977a58b9e0a7ce28e065d02efb9694c4f850e9ac`](https://starkscan.co/contract/0x02a8ceba3ddea00f9b8137d7977a58b9e0a7ce28e065d02efb9694c4f850e9ac) |
+| CreditPool (class, V2) | [`0x07ec75b2685a7c5e712a3d9067d94305aa6d00d3ece70dfb4f00b7aef526f4af`](https://starkscan.co/class/0x07ec75b2685a7c5e712a3d9067d94305aa6d00d3ece70dfb4f00b7aef526f4af) |
+| PoolFactory (class, V2) | [`0x039086a75895b79304cb1a6fc4eeef4abc289b295b056463ba2383af3ee388bc`](https://starkscan.co/class/0x039086a75895b79304cb1a6fc4eeef4abc289b295b056463ba2383af3ee388bc) |
 | USDC (Starknet) | [`0x033068f6539f8e6e6b131e6b2b814e6c34a5224bc66947c47dab9dfee93b35fb`](https://starkscan.co/contract/0x033068f6539f8e6e6b131e6b2b814e6c34a5224bc66947c47dab9dfee93b35fb) |
+| PoolFactory (V1, superseded) | [`0x070bd23697b102a152f6d9c322a795cd42466c43d106a420a2d8d3e046cc2673`](https://starkscan.co/contract/0x070bd23697b102a152f6d9c322a795cd42466c43d106a420a2d8d3e046cc2673) |
+
+V2 was deployed 2026-08-26. **Use the V2 factory**; V1 remains on chain and
+its pools still function, but it predates the investor allowlist and the
+owner-gated pool forwarders, and its `create_pool` takes six arguments where
+V2 takes eight.
+
+V2 ownership has **not yet been transferred to the treasury multisig** — it
+is still held by the deploying key while the first pool is rehearsed. Until
+that handover, treat the deployment as pre-production regardless of what the
+contracts themselves guarantee. See
+[`audits/2026-08-24-…-forwarder-reachability-rereview.md`](audits/2026-08-24-independent-claude-fable5-forwarder-reachability-rereview.md),
+"What could not be verified".
 
 LP app (production): https://rocabeneficios.vercel.app, where investors
 onboard with a **passkey** (no seed phrase, no gas) via
@@ -133,6 +148,55 @@ Identity verification, sanctions screening and the judgement about who may
 participate all happen off chain. The officer's key is the last step that makes
 an already-made decision effective on chain.
 
+### Who holds what, in practice
+
+The intended production split is two people: **one responsible for funds, one
+for the whitelist.** They map to the keys as follows, and the mapping is worth
+stating because only one of these keys can move money.
+
+| Key | Held by | Can move investor funds? |
+|---|---|---|
+| **Pool founder** | Funds owner (a 2-of-3 multisig) | **Yes** — `borrow()` transfers the entire pool balance to the founder |
+| **Factory owner** | Funds owner | No |
+| **Compliance officer** | Whitelist owner | No |
+
+The founder key is the one that must be a multisig. A single key that can call
+`borrow()` on a funded pool can take the whole placement in one transaction.
+The factory owner cannot: `platform_wallet` is frozen into each pool at
+`initialize` and `repay` pays from the pool's own copy, and `set_pool_class_hash`
+only affects pools deployed afterwards — so a compromised owner key can grief
+(pause, mislabel) but cannot reach deposits.
+
+Conversely the compliance key should **not** be a multisig. It exists to be
+reachable in minutes; a signing ceremony defeats it.
+
+**During a rehearsal one person holds every role.** That is deliberate and it
+is safe for exactly one reason: the only money at risk is the operator's own.
+The founder is fixed per pool at `create_pool` and can never be changed, so a
+pool founded by a personal wallet is founded by that wallet forever — which
+means the rehearsal pool must never be reused for real investor capital.
+
+Authorization during a rehearsal runs through
+[`scripts/authorize.sh`](scripts/authorize.sh), not the admin UI: the app
+proposes this call through the multisig, which is correct for production and
+unusable before a multisig exists.
+
+The handover to the multisig runs through
+[`scripts/transfer-ownership.sh`](scripts/transfer-ownership.sh), and it is a
+one-way door. The factory uses OpenZeppelin's **one-step** `OwnableComponent`:
+there is no `accept_ownership` and no pending-owner state, so
+`transfer_ownership(X)` makes X the owner immediately and forever. If X is a
+typo, the factory is permanently unadministrable — fees frozen, pool class
+frozen, no pool can ever be unpaused or marked defaulted, compliance can never
+be rotated. Deployed pools keep working and lenders can always withdraw, so
+funds are never at risk, but nothing can be changed again.
+
+That is why the script refuses an address with no contract deployed at it: a
+multisig is a contract and a mistyped felt almost never is.
+
+**Never call `renounce_ownership`.** It is in the ABI because it ships with the
+OZ mixin, it permanently removes the owner, and there is no recovery.
+
 ## How a pool works
 
 ```
@@ -209,13 +273,16 @@ Read back from `get_config()` on mainnet, for comparison after any redeploy:
 
 | | |
 |---|---|
-| owner | `0x06152df0e70bedbf7c8256f9e26eda77ba8785db3d8b7dc545a62886f618d5c0` |
+| owner | deploying key, pending transfer to the multisig |
 | platform_wallet | same as owner |
 | usdc_address | `0x033068f6539f8e6e6b131e6b2b814e6c34a5224bc66947c47dab9dfee93b35fb` |
-| credit_pool_class_hash | `0x07d50032f6d6d9e15b8a550d686c6737e2ecca2a51c9ee397235f946382502cc` |
-| creation_fee_cap | 199 USDC |
-| creation_fee_bps | 100 (1%) |
-| repayment_fee_bps | 50 (0.5%) |
+| credit_pool_class_hash | `0x07ec75b2685a7c5e712a3d9067d94305aa6d00d3ece70dfb4f00b7aef526f4af` |
+| creation_fee_cap | 199 USDC (ceiling, only applies if bps is ever raised) |
+| creation_fee_bps | **0** |
+| repayment_fee_bps | **0** |
+
+V2 ships with both fee rates at zero, so creating a pool and repaying one
+cost nothing beyond gas. V1 defaulted to 1% creation and 0.5% repayment.
 
 Fees are storage, not constants: `set_fees()` changes them on a live factory
 with no redeploy. The values above are the constructor defaults, still

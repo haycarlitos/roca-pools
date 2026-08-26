@@ -2,10 +2,14 @@
 #
 # Deploy PoolFactory (and the CreditPool class it clones) to Starknet.
 #
-# The mainnet factory at 0x070bd23697b102a152f6d9c322a795cd42466c43d106a420a2d8d3e046cc2673
+# The original mainnet factory at
+# 0x070bd23697b102a152f6d9c322a795cd42466c43d106a420a2d8d3e046cc2673
 # was deployed by hand and the steps existed only in someone's shell history,
 # which meant the deployment could not be reproduced or reviewed. This is that
-# process, written down.
+# process, written down — and it is how the V2 factory at
+# 0x02a8ceba3ddea00f9b8137d7977a58b9e0a7ce28e065d02efb9694c4f850e9ac
+# was deployed on 2026-08-26, which is the first deployment of this project
+# that anyone else can reproduce.
 #
 # Order matters: PoolFactory's constructor takes the CreditPool CLASS HASH,
 # because create_pool deploys pools from that class. So CreditPool must be
@@ -52,6 +56,13 @@ done
 
 die() { echo "error: $*" >&2; exit 1; }
 
+# sncast 0.53 flag placement, which is not symmetric and is easy to get wrong:
+#   --account is a GLOBAL option and goes BEFORE the subcommand
+#   --url     is a SUBCOMMAND option and goes AFTER it
+# i.e.  sncast --account NAME declare --url URL --contract-name X
+# Putting --url first fails with "unexpected argument '--url' found", and the
+# tip it prints ("'declare --url' exists") is the whole explanation.
+
 # ---- preflight -------------------------------------------------------------
 
 command -v scarb >/dev/null || die "scarb not found. Install the pins in .tool-versions (asdf install / mise install)."
@@ -66,7 +77,7 @@ for addr in "$OWNER" "$PLATFORM_WALLET" "$USDC"; do
   [[ "$addr" =~ ^0x[0-9a-fA-F]{1,64}$ ]] || die "not a felt address: $addr"
 done
 
-CHAIN_ID="$(sncast --url "$STARKNET_RPC_URL" show-config 2>/dev/null | grep -i chain || true)"
+CHAIN_ID="$(sncast show-config --url "$STARKNET_RPC_URL" 2>/dev/null | grep -i chain || true)"
 
 cat <<EOF
 
@@ -95,18 +106,66 @@ scarb build
 # fail. Parse the hash out of either outcome.
 
 declare_contract() {
-  local name="$1" out
+  local name="$1" out tmp rc
   echo "==> declare $name" >&2
-  if ! out="$(sncast --url "$STARKNET_RPC_URL" --account "$ACCOUNT" \
-                declare --contract-name "$name" 2>&1)"; then
-    if grep -qi 'already declared' <<<"$out"; then
-      echo "    already declared, reusing class hash" >&2
-    else
-      echo "$out" >&2
-      die "declare $name failed"
-    fi
+  echo "    (sncast recompiles in release profile first, then estimates and" >&2
+  echo "     submits — expect a minute or two before the class hash appears)" >&2
+
+  # Stream sncast's output AND capture it. It used to be captured only, so a
+  # declare was indistinguishable from a hang for well over a minute:
+  # recompile, then fee estimation, then waiting for acceptance, all silent.
+  # During the first real deploy that silence was twice read as a failure.
+  #
+  # tee goes to stderr so the function's stdout stays clean — the caller
+  # captures it to read the class hash out.
+  # --wait is not optional here. Without it sncast returns as soon as the
+  # transaction is accepted by the gateway, not when it is included, so the
+  # NEXT declare reads a stale nonce and dies with "Invalid transaction
+  # nonce" — which is what happened on the first successful run: CreditPool
+  # declared fine, PoolFactory failed immediately after.
+  tmp="$(mktemp)"
+  set +e
+  sncast --account "$ACCOUNT" --wait \
+    declare --url "$STARKNET_RPC_URL" --contract-name "$name" 2>&1 | tee "$tmp" >&2
+  # Read PIPESTATUS immediately: any command in between overwrites it.
+  rc=${PIPESTATUS[0]}
+  set -e
+  out="$(cat "$tmp")"; rm -f "$tmp"
+
+  # Decide on the OUTPUT, not the exit code. sncast exits 0 when a class is
+  # already declared while printing "Error: ... already declared", so gating
+  # this on rc != 0 skipped the branch entirely and fell through to parsing a
+  # hash that was never in the text.
+  local hash
+  hash="$(sed -n 's/.*Class Hash: *\(0x[0-9a-fA-F]*\).*/\1/p' <<<"$out" | head -1)"
+
+  if [[ -n "$hash" ]]; then
+    # Fresh declare. Match the labelled line rather than the first hex string:
+    # the output also carries a transaction hash and two explorer URLs.
+    echo "$hash"
+    return 0
   fi
-  grep -oE '0x[0-9a-fA-F]{40,64}' <<<"$out" | head -1
+
+  if grep -qi 'already declared' <<<"$out"; then
+    # Re-declaring an existing class is success, not failure — that is what
+    # makes a re-run safe. But sncast's message carries no class hash, so
+    # compute it locally: hashes are deterministic from the compiled Sierra,
+    # which is the same property that makes the re-declare free.
+    echo "    already declared, computing class hash locally" >&2
+    hash="$(sncast utils class-hash --contract-name "$name" 2>&1 \
+            | sed -n 's/.*Class Hash: *\(0x[0-9a-fA-F]*\).*/\1/p' | head -1)"
+    [[ -n "$hash" ]] || die "class already declared but its hash could not be computed locally"
+    echo "$hash"
+    return 0
+  fi
+
+  if grep -qi 'invalid transaction nonce' <<<"$out"; then
+    die "declare $name failed on a stale nonce: the previous transaction had
+       not been included yet. Re-run — already-declared classes are free, so
+       retrying costs nothing."
+  fi
+
+  die "declare $name failed (see output above)"
 }
 
 CREDIT_POOL_CLASS="$(declare_contract CreditPool)"
@@ -130,10 +189,17 @@ echo "    PoolFactory class: $FACTORY_CLASS"
 # Getting it wrong deploys a factory that pays fees to the USDC contract.
 
 echo "==> deploy PoolFactory"
-DEPLOY_OUT="$(sncast --url "$STARKNET_RPC_URL" --account "$ACCOUNT" \
-  deploy --class-hash "$FACTORY_CLASS" \
-  --constructor-calldata "$OWNER" "$PLATFORM_WALLET" "$USDC" "$CREDIT_POOL_CLASS" 2>&1)" \
-  || { echo "$DEPLOY_OUT" >&2; die "deploy failed"; }
+# Streamed for the same reason as the declares: this waits on acceptance too.
+DEPLOY_TMP="$(mktemp)"
+set +e
+sncast --account "$ACCOUNT" --wait \
+  deploy --url "$STARKNET_RPC_URL" --class-hash "$FACTORY_CLASS" \
+  --constructor-calldata "$OWNER" "$PLATFORM_WALLET" "$USDC" "$CREDIT_POOL_CLASS" 2>&1 \
+  | tee "$DEPLOY_TMP"
+DEPLOY_RC=${PIPESTATUS[0]}
+set -e
+DEPLOY_OUT="$(cat "$DEPLOY_TMP")"; rm -f "$DEPLOY_TMP"
+[[ "$DEPLOY_RC" == "0" ]] || die "deploy failed (see output above)"
 
 FACTORY_ADDRESS="$(grep -oE 'contract_address: *0x[0-9a-fA-F]+' <<<"$DEPLOY_OUT" | grep -oE '0x[0-9a-fA-F]+' | head -1)"
 [[ -n "$FACTORY_ADDRESS" ]] || { echo "$DEPLOY_OUT" >&2; die "could not parse deployed address"; }
@@ -142,7 +208,7 @@ FACTORY_ADDRESS="$(grep -oE 'contract_address: *0x[0-9a-fA-F]+' <<<"$DEPLOY_OUT"
 # Read the config back rather than trusting the deploy succeeded as intended.
 
 echo "==> verify get_config()"
-sncast --url "$STARKNET_RPC_URL" call \
+sncast call --url "$STARKNET_RPC_URL" \
   --contract-address "$FACTORY_ADDRESS" --function get_config || \
   echo "    (verification call failed — check manually before using this factory)"
 

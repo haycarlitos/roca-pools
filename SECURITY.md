@@ -7,8 +7,15 @@ deployment: this project is mainnet only, deliberately.
 
 | Contract | Mainnet |
 |---|---|
-| PoolFactory | `0x070bd23697b102a152f6d9c322a795cd42466c43d106a420a2d8d3e046cc2673` |
-| CreditPool (class) | `0x07d50032f6d6d9e15b8a550d686c6737e2ecca2a51c9ee397235f946382502cc` |
+| **PoolFactory (V2, current)** | `0x02a8ceba3ddea00f9b8137d7977a58b9e0a7ce28e065d02efb9694c4f850e9ac` |
+| CreditPool (class, V2) | `0x07ec75b2685a7c5e712a3d9067d94305aa6d00d3ece70dfb4f00b7aef526f4af` |
+| PoolFactory (class, V2) | `0x039086a75895b79304cb1a6fc4eeef4abc289b295b056463ba2383af3ee388bc` |
+| PoolFactory (V1, superseded) | `0x070bd23697b102a152f6d9c322a795cd42466c43d106a420a2d8d3e046cc2673` |
+| CreditPool (class, V1) | `0x07d50032f6d6d9e15b8a550d686c6737e2ecca2a51c9ee397235f946382502cc` |
+
+V2 deployed 2026-08-26. Reports against either version are in scope; V1 is
+still on chain and its pools still hold the invariants they were audited
+under, but new work targets V2.
 
 The off-chain application that reads and writes these contracts is a separate,
 closed repository and is out of scope here.
