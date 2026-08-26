@@ -101,6 +101,28 @@ else
   # 0x534e5f4d41494e == "SN_MAIN"
   if [[ "$cid" == "0x534e5f4d41494e" ]]; then pass "reachable, chain SN_MAIN"
   else fail "chain id $cid is not SN_MAIN (this project is mainnet only)"; fi
+
+  # Reachable is not the same as usable. Read-only endpoints answer chainId
+  # perfectly well and then refuse starknet_addDeclareTransaction, which is
+  # the first thing a deploy needs — so this check used to pass on a node
+  # that could never deploy, and the failure surfaced after `scarb build`
+  # with a raw JSON-RPC error.
+  #
+  # Deliberately invalid params: a live method answers with a validation
+  # error (-32602), a missing one answers -32601. Nothing can be created
+  # either way, so this is safe to run against mainnet.
+  wr=$(curl -s "$STARKNET_RPC_URL" -H 'content-type: application/json' \
+       -d '{"jsonrpc":"2.0","id":1,"method":"starknet_addDeclareTransaction","params":[{}]}' \
+       | sed -n 's/.*"code":\(-[0-9]*\).*/\1/p' | head -1)
+  case "$wr" in
+    -32601)
+      fail "this RPC is READ-ONLY (starknet_addDeclareTransaction not supported)"
+      echo "       reads work, declares do not. Use a write-capable endpoint;"
+      echo "       sncast's own default works: --network mainnet"
+      ;;
+    "") warn "could not determine whether the RPC accepts writes" ;;
+    *)  pass "RPC accepts writes" ;;
+  esac
 fi
 
 echo "== deployer account '$ACCOUNT' =="
