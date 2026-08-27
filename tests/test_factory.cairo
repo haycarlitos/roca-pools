@@ -560,3 +560,74 @@ fn test_forwarder_does_not_bypass_the_pool_own_rules() {
     start_cheat_caller_address(factory.contract_address, OWNER());
     factory.mark_pool_defaulted(pool.contract_address);
 }
+
+// ---------------------------------------------------------------------------
+// Withdrawal underflow after a lender has collected interest
+// ---------------------------------------------------------------------------
+//
+// `_calculate_withdrawal` computes, on the post-borrow path:
+//
+//     let max_principal = position.deposited - position.withdrawn;
+//
+// with no guard. `withdrawn` exceeds `deposited` the moment a lender collects
+// any interest, so from that point the subtraction underflows and the whole
+// function panics with 'u256_sub Overflow'.
+//
+// That reaches further than a broken view. `withdraw()` calls
+// `_calculate_withdrawal` as its first step, so the lender cannot withdraw
+// again either: any entitlement that arrives after they crossed the line is
+// permanently unreachable.
+//
+// Found on mainnet during the first rehearsal, as a reverting
+// get_available_withdrawal on a pool that had just been repaid in full.
+
+fn repay_amount(usdc: IMockERC20Dispatcher, pool: ICreditPoolDispatcher, amount: u256) {
+    usdc.mint(FOUNDER(), amount);
+    start_cheat_caller_address(usdc.contract_address, FOUNDER());
+    usdc.approve(pool.contract_address, amount);
+    stop_cheat_caller_address(usdc.contract_address);
+    start_cheat_caller_address(pool.contract_address, FOUNDER());
+    pool.repay(amount);
+    stop_cheat_caller_address(pool.contract_address);
+}
+
+/// Two lenders, a partial repayment, an exit that collects interest, then the
+/// rest arrives. The second withdrawal must not panic.
+#[test]
+fn test_lender_can_still_withdraw_after_collecting_interest() {
+    let usdc = deploy_usdc();
+    let factory = deploy_factory(usdc.contract_address);
+    let pool = create_pool(factory, 25, 0);
+
+    start_cheat_caller_address(factory.contract_address, OWNER());
+    factory.set_lp_authorization_batch(array![LENDER1(), LENDER2()].span(), true);
+    stop_cheat_caller_address(factory.contract_address);
+
+    // 10_000 cap, split evenly.
+    try_deposit(usdc, pool, LENDER1(), 5_000 * ONE_USDC);
+    try_deposit(usdc, pool, LENDER2(), 5_000 * ONE_USDC);
+
+    start_cheat_caller_address(pool.contract_address, FOUNDER());
+    pool.borrow();
+    stop_cheat_caller_address(pool.contract_address);
+
+    // Owed is 10_000 + 10% = 11_000. Repay most of it.
+    repay_amount(usdc, pool, 10_400 * ONE_USDC);
+
+    // LENDER1 takes their share: 5_200, which exceeds their 5_000 deposit.
+    start_cheat_caller_address(pool.contract_address, LENDER1());
+    pool.withdraw();
+    stop_cheat_caller_address(pool.contract_address);
+
+    // The remainder arrives.
+    repay_amount(usdc, pool, 600 * ONE_USDC);
+
+    // Reading the position must not panic now that withdrawn > deposited.
+    let info = pool.get_available_withdrawal(LENDER1());
+    assert(info.available > 0, 'should have more to take');
+
+    // And the lender must actually be able to take it.
+    start_cheat_caller_address(pool.contract_address, LENDER1());
+    pool.withdraw();
+    stop_cheat_caller_address(pool.contract_address);
+}
