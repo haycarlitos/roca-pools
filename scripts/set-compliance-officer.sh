@@ -13,6 +13,9 @@
 # watching, which is also why the target is echoed and confirmed before send.
 set -euo pipefail
 
+# shellcheck source=scripts/lib/starknet.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/starknet.sh"
+
 die() { echo "error: $*" >&2; exit 1; }
 
 FACTORY=""; OFFICER=""; ACCOUNT="${SNCAST_ACCOUNT:-roca-deployer}"; DRY_RUN=0; CHECK=0
@@ -28,7 +31,8 @@ options:
   --dry-run        print the call without sending it
 
 env:
-  STARKNET_RPC_URL   required; must be a WRITE-capable endpoint
+  STARKNET_RPC_URL   optional; must be WRITE-capable. Unset it to use
+                     sncast's mainnet default, which accepts writes.
 USAGE
 }
 
@@ -44,16 +48,28 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -n "${STARKNET_RPC_URL:-}" ]] || die "STARKNET_RPC_URL is not set"
 [[ -n "$FACTORY" ]] || die "--factory is required"
 
 is_felt() { [[ "$1" =~ ^0x[0-9a-fA-F]{1,64}$ ]]; }
 is_felt "$FACTORY" || die "--factory is not a felt: $FACTORY"
 
+sn_set_target
+
 read_officer() {
-  sncast --account "$ACCOUNT" call --url "$STARKNET_RPC_URL" \
+  sncast --account "$ACCOUNT" call "${TARGET[@]}" \
     --contract-address "$FACTORY" --function get_compliance_officer 2>&1
 }
+
+# The felt as a bare lowercase hex string, for comparison. Padding differs
+# between what the caller types and what the node renders, so the addresses
+# are normalised rather than string-matched.
+officer_felt() {
+  local out
+  out="$(read_officer)" || return 1
+  sed -n 's/.*ContractAddress(\(0x[0-9a-fA-F]*\)).*/\1/p' <<<"$out" | head -1
+}
+
+norm() { python3 -c "import sys; print(hex(int(sys.argv[1],16)))" "$1" 2>/dev/null; }
 
 if [[ "$CHECK" == "1" ]]; then
   echo "==> get_compliance_officer($FACTORY)"
@@ -82,24 +98,32 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-out="$(sncast --account "$ACCOUNT" invoke --url "$STARKNET_RPC_URL" \
-        --contract-address "$FACTORY" --function set_compliance_officer \
-        --calldata "$OFFICER" 2>&1)" || {
-  echo "$out" >&2
-  # The two failures worth naming: the wrong signer, and a stale RPC that
-  # cannot write. Both look like an opaque revert otherwise.
-  if grep -qiE 'owner|Ownable' <<<"$out"; then
-    die "this account is not the factory owner"
-  fi
-  die "invoke failed"
-}
-echo "$out"
+# Before spending a signature: an endpoint that serves views happily and
+# refuses writes fails AFTER this point and reads as a transaction error.
+require_write_rpc
 
-# Confirm against the chain rather than trusting the invoke's own output: the
-# transaction can land and still not do what you meant if the wrong factory
-# was passed.
+if ! sn_invoke --account "$ACCOUNT" invoke "${TARGET[@]}" \
+       --contract-address "$FACTORY" --function set_compliance_officer \
+       --calldata "$OFFICER"; then
+  # The failure worth naming: the wrong signer, which surfaces as an opaque
+  # revert otherwise.
+  die "invoke failed (if it mentions Ownable, this account is not the owner)"
+fi
+
+# Confirm against the chain rather than trusting the invoke's own output. The
+# transaction can land and still not do what you meant if the wrong factory was
+# passed — and sncast can report success for a write that never happened, which
+# is exactly what this comparison catches.
 echo
 echo "==> verifying"
 sleep 5
-read_officer | grep -E "Response:" || \
-  echo "    not confirmed yet — re-run with --check in a moment." >&2
+got="$(officer_felt || true)"
+if [[ -z "$got" ]]; then
+  die "could not read the officer back; re-run with --check in a moment"
+fi
+if [[ "$(norm "$got")" != "$(norm "$OFFICER")" ]]; then
+  echo "    on chain: $got" >&2
+  echo "    expected: $OFFICER" >&2
+  die "the officer did NOT change — the transaction did not take effect"
+fi
+echo "    confirmed: $got"

@@ -71,11 +71,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# shellcheck source=scripts/lib/starknet.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/starknet.sh"
+
 die() { echo "error: $*" >&2; exit 1; }
 
 command -v sncast >/dev/null || die "sncast not found. Install starknet-foundry 0.53.0."
-[[ -n "${STARKNET_RPC_URL:-}" ]] || die "STARKNET_RPC_URL is not set."
 [[ -n "$FACTORY" ]] || die "--factory is required (the PoolFactory address)."
+
+# STARKNET_RPC_URL is optional: unset falls back to sncast's mainnet default,
+# which accepts writes. A custom read-only endpoint is what breaks this script,
+# so requiring one made the failure MORE likely, not less.
+sn_set_target
 
 is_felt() { [[ "$1" =~ ^0x[0-9a-fA-F]{1,64}$ ]]; }
 is_felt "$FACTORY" || die "not a felt address: $FACTORY"
@@ -88,7 +95,7 @@ is_felt "$FACTORY" || die "not a felt address: $FACTORY"
 if [[ -n "$CHECK" ]]; then
   is_felt "$CHECK" || die "not a felt address: $CHECK"
   echo "==> is_authorized($CHECK)"
-  out="$(sncast call --url "$STARKNET_RPC_URL" \
+  out="$(sncast call "${TARGET[@]}" \
           --contract-address "$FACTORY" \
           --function is_authorized \
           --calldata "$CHECK" 2>&1)" || { echo "$out" >&2; die "call failed"; }
@@ -152,27 +159,48 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
+# Before spending a signature: an endpoint that serves views happily and
+# refuses writes fails AFTER this point and reads as a transaction error rather
+# than a configuration one.
+require_write_rpc
+
 echo "==> set_lp_authorization($LP, $FLAG)"
-out="$(sncast --account "$ACCOUNT" invoke --url "$STARKNET_RPC_URL" \
-        --contract-address "$FACTORY" \
-        --function set_lp_authorization \
-        --calldata "$LP" "$FLAG" 2>&1)" || {
-  echo "$out" >&2
+if ! sn_invoke --account "$ACCOUNT" invoke "${TARGET[@]}" \
+       --contract-address "$FACTORY" \
+       --function set_lp_authorization \
+       --calldata "$LP" "$FLAG"; then
   # The most likely failure by far, and the least obvious from the raw revert.
-  if grep -qi 'compliance' <<<"$out"; then
-    die "this account does not hold the compliance role on that factory"
-  fi
-  die "invoke failed"
-}
-echo "$out"
+  die "invoke failed (if it mentions compliance, this account does not hold the role)"
+fi
 
 # Confirm against the chain rather than trusting the invoke's own output. The
 # transaction can land and still not do what you meant if the wrong factory or
-# the wrong flag was passed.
+# the wrong flag was passed — and sncast can report success for a write that
+# never happened, which is what this comparison catches.
+#
+# Previously this shelled out to `--check`, which prints the state and exits 0
+# whichever way it reads. So a failed authorization printed "NOT authorized"
+# and the script still exited 0, looking like success.
 echo
 echo "==> verifying"
 sleep 3
-"$0" --factory "$FACTORY" --check "$LP" || {
-  echo "    could not verify yet — the transaction may still be pending." >&2
-  echo "    re-run: $0 --factory $FACTORY --check $LP" >&2
+out="$(sncast call "${TARGET[@]}" \
+        --contract-address "$FACTORY" \
+        --function is_authorized \
+        --calldata "$LP" 2>&1)" || {
+  echo "$out" >&2
+  die "could not read the authorization back; re-run with --check in a moment"
 }
+if [[ "$FLAG" == "1" ]]; then
+  grep -qE '0x1\b|\[0x1\]' <<<"$out" || {
+    echo "$out" >&2
+    die "$LP is still NOT authorized — the transaction did not take effect"
+  }
+  echo "    confirmed: AUTHORIZED"
+else
+  grep -qE '0x0\b|\[0x0\]' <<<"$out" || {
+    echo "$out" >&2
+    die "$LP is still authorized — the revocation did not take effect"
+  }
+  echo "    confirmed: revoked"
+fi
